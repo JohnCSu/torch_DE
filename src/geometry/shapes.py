@@ -1,5 +1,5 @@
 from shapely.geometry import Polygon,Point
-from sampling import *
+from .sampling import *
 from scipy.spatial import Delaunay
 import matplotlib.pyplot as plt
 import torch

@@ -1,3 +1,7 @@
 .vscode
 __pycache__
-lightning_logs
+*lightning_logs*
+test.ipynb
+pyproject.toml
+build/*
+dist/*
