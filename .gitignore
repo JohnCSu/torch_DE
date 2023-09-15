@@ -1,7 +1,5 @@
 .vscode
 __pycache__
 *lightning_logs*
-test.ipynb
-pyproject.toml
 build/*
 dist/*
