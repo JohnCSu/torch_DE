@@ -7,14 +7,27 @@ import torch
 def Circle(center:tuple,r:float,num_points = 1024):
     return Point(center).buffer(r,num_points)
 
-def Rectangle(coords,create_from = 'corners'):
+def Rectangle(coords: list,create_from = 'corners'):
+    '''
+    Create a Rectangle using either the corners method or midpoint method
+
+    if create_from == 'corners':
+        coords = [(x1,y1),(x2,y2)] where (x1,y1) is the coords for the lower left corner and (x2,y2) is the coord for the upper right corner
+    
+    if create_from == 'midpoint':
+        coord = [(x,y),(w,h)] where (x,y) is the centre of the rectangle and (w,h) is the width and height of the rectangle respectively
+
+    returns:
+        Shapely Polygon Object representing the rectangle created
+    '''
+
     if create_from == 'corners':
             #[(x1,y1),(x2,y2)]
         (x1,y1),(x2,y2) = coords
         coords = [(x1,y1),(x1,y1+y2),(x2,y2),(x1+x2,y1)]
     elif create_from == 'midpoint':
-        # [(x,y),w,h]
-        (x,y),w,h = coords
+        # [(x,y),(w,h)]
+        (x,y),(w,h) = coords
         coords = [(x-w/2,y-h/2),(x-w/2,y+h/2),(x+w/2,y+h/2),(x+w/2,y-h/2)]
     return Polygon(coords)
 
@@ -81,17 +94,21 @@ class Domain2D():
         self.operations[name] = self.operations[shapeID].exterior
 
     
-    def generate_points(self,n,func = None,output_type = 'numpy',**kwargs):
+    def generate_points(self,n,shapeID = None,func = None,output_type = 'numpy',**kwargs):
         '''
         sample points from domain. Default triangulates the domain and then samples from the
-            triangulated domain.
+            triangulated domain or specified Group Shape.
         
         Users can implement their own custom function by passing it in with func. func 
         should take the form f(n,shape,kw1,kw2...) where n is the number of points to 
         sample, shape is some Polygon object followed by any other keyword arguements
         
         '''
-        shape = self.Domain
+        if shapeID is None:
+            shape = self.Domain
+        else:
+            shape = self.operations[shapeID]
+        
         if func is None:
             points,triangles = triangulate_shape(shape,**kwargs)
             out = generate_points_from_triangles(points,triangles,n)
@@ -101,7 +118,7 @@ class Domain2D():
         if output_type == 'numpy':
             return out
         elif output_type == 'torch':
-            return torch.tensor(out)
+            return torch.tensor(out).to(torch.float32)
 
 
 def is_tri_in_shape(points,triangles,shape):

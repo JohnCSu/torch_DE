@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[project]
+name = "Torch_DE"
+version = "0.0.1"
+authors = [
+  { name="John Su", email="JohnChangSu@gmail.com" },
+]
+description = "A package for solving differential equations using neural networks"
+readme = "ReadMe.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Johnnny-suu/torch_DE"
+"Bug Tracker" = "https://github.com/Johnnny-suu/torch_DE/issues"

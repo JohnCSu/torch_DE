@@ -109,7 +109,7 @@ class DE_Getter():
         x (torch.tensor) : input tensor. If groups and groups sizes is used, it should be a concatenated tensor of all groups of tensors in corresponding order \n
         groups (list | tuple) : a list of names for each group of output. They should be ordered the same way x was concatenated. If none, then input tensor is treated as a single group. Must be used in conjunction with group_sizes \n
         groups__sizes (list | tuple): a list of ints describing the different lengths of each group in the input tensor x. Must be used in conjunction with groups \n
-        
+
         Returns:\n 
         if groups == None:
             output (dict) : a dictionary of the form output[derivative_name] = tensor
@@ -142,32 +142,22 @@ class DE_Getter():
         derivs.append(y_tuple)
         
 
-        if groups is None:
-            return self.assign_derivs(derivs)
-        else:
-            output = {}
-            #From Group size determine start of batching
-            idx_start = 0
-            for group,g1 in zip(groups,group_sizes):
-                idx_end = idx_start + g1
-                group_deriv = [deriv[idx_start:idx_end] for deriv in derivs]
-                output[group] = self.assign_derivs(group_deriv)
-                idx_start = g1
-            return output
-        # for deriv_var,idx in self.derivatives_index.items(): 
-        #     #Highest derivs are at 0 and last eval is at -1
-        #     order = len(idx)-1
-        #     j = self.highest_order-order
-
-        #     # print(order,j,deriv_var)
-        #     #Slice(None) python trick. Represents the ':' when indexing like A[:,1,2]
-        #     index = (slice(None),) + idx
-
-        #     self.output[deriv_var] = derivs[j][index] 
+        # if groups is None:
+        #     return self.assign_derivs(derivs)
+        # else:
+        output = {'all' : self.assign_derivs(derivs)}
+        #From Group size determine start of batching
+        idx_start = 0
+        for group,g1 in zip(groups,group_sizes):
+            idx_end = idx_start + g1
+            group_deriv = [deriv[idx_start:idx_end] for deriv in derivs]
+            output[group] = self.assign_derivs(group_deriv)
+            idx_start = g1
+        
             
-        # return self.output
+        return output
+        
 
-    
     def assign_derivs(self,derivs):
         
         #Should I turn this into a one liner?
