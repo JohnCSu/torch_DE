@@ -7,7 +7,7 @@ version = "0.0.1"
 authors = [
   { name="John Su", email="JohnChangSu@gmail.com" },
 ]
-description = "A package for solving differential equations using neural networks"
+description = "A package for solving differential equations using physics informed neural networks"
 readme = "ReadMe.md"
 requires-python = ">=3.9"
 classifiers = [

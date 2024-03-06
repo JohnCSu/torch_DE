@@ -2,9 +2,25 @@ import torch
 import torch.nn as nn
 from functorch import jacrev,jacfwd,vmap,make_functional
 
-import matplotlib.pyplot as plt
 
-from torch.utils.data import DataLoader as DL
+
+def aux_function(aux_func,is_aux = True) -> object:
+    #aux_func has the output of (df,f) so we need it to output (df,(df,f))
+    
+    def initial_aux_func(x:torch.tensor) -> tuple[torch.tensor,torch.tensor]:
+        out = aux_func(x)
+        return (out,out)
+    
+    def inner_aux_func(x:torch.tensor) -> tuple[torch.tensor,torch.tensor]:
+        out = aux_func(x)
+        return (out[0],out)
+    
+    if is_aux:
+        return inner_aux_func
+    else:
+        return initial_aux_func
+    
+    
 
 
 class DE_Getter():
@@ -147,6 +163,10 @@ class DE_Getter():
         # else:
         output = {'all' : self.assign_derivs(derivs)}
         #From Group size determine start of batching
+
+        if groups is None:
+            return output
+
         idx_start = 0
         for group,g1 in zip(groups,group_sizes):
             idx_end = idx_start + g1
@@ -224,21 +244,3 @@ class DE_Getter():
 
         
 
-
-def aux_function(aux_func,is_aux = True) -> object:
-    #aux_func has the output of (df,f) so we need it to output (df,(df,f))
-    
-    def initial_aux_func(x:torch.tensor) -> tuple[torch.tensor,torch.tensor]:
-        out = aux_func(x)
-        return (out,out)
-    
-    def inner_aux_func(x:torch.tensor) -> tuple[torch.tensor,torch.tensor]:
-        out = aux_func(x)
-        return (out[0],out)
-    
-    if is_aux:
-        return inner_aux_func
-    else:
-        return initial_aux_func
-    
-    
