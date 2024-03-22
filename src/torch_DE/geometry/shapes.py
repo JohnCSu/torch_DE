@@ -1,9 +1,9 @@
-from shapely.geometry import Polygon,Point
+from shapely.geometry import Polygon,Point, LineString
 from .sampling import *
 from scipy.spatial import Delaunay
 import matplotlib.pyplot as plt
 import torch
-
+from numpy.random import rand
 def Circle(center:tuple,r:float,num_points = 1024):
     return Point(center).buffer(r,num_points)
 
@@ -24,7 +24,7 @@ def Rectangle(coords: list,create_from = 'corners'):
     if create_from == 'corners':
             #[(x1,y1),(x2,y2)]
         (x1,y1),(x2,y2) = coords
-        coords = [(x1,y1),(x1,y1+y2),(x2,y2),(x1+x2,y1)]
+        coords = [(x1,y1),(x1,y2),(x2,y2),(x2,y1)]
     elif create_from == 'midpoint':
         # [(x,y),(w,h)]
         (x,y),(w,h) = coords
@@ -42,11 +42,31 @@ class Domain2D():
         self.num_operations = 1 
         self.Domain = base
         self.bounds = self.Domain.bounds
+        self.boundary = self.Domain.boundary
         self.contains = self.Domain.contains
+        self.points = None
+        self.triangles = None
+        #Create Lines from bounds
+        self.boundary_groups = {}
+        self.create_domain_exterior_edges()
+    
     def __getitem__(self,key):
         #Returns the coords of a part of the domain
         return self.operations[key]
     
+    def create_domain_exterior_edges(self):
+        p = self.boundary.coords
+        num_p = len(p)
+
+        self.boundary_groups.update(
+            {
+                f'exterior_edge_{i}':  LineString([p[i],p[i+1]]) for i in range(num_p-1)
+            }
+
+        )
+
+
+
     def merge(self,*shapes,names = None):
         self.boolean_op(*shapes,names = names,op = 'add',inplace=True)
     def remove(self,*shapes,names= None):
@@ -90,11 +110,18 @@ class Domain2D():
         if not inplace:
             return self
     
-    def create_boundary_group(self,shapeID,name):
-        self.operations[name] = self.operations[shapeID].exterior
+    def add_boundary_group(self,shapeID,name = None):
+        if name is None:
+            key = shapeID
+        else:
+            key = name
+        self.boundary_groups[key] = self.operations[shapeID].exterior
 
-    
-    def generate_points(self,n,shapeID = None,func = None,output_type = 'numpy',**kwargs):
+    def clear_mesh(self):
+        self.points,self.triangles = (None,None)
+        print('mesh cleared')
+
+    def generate_points(self,n,shapeID = None,func = None,output_type = 'torch',**kwargs):
         '''
         sample points from domain. Default triangulates the domain and then samples from the
             triangulated domain or specified Group Shape.
@@ -110,7 +137,10 @@ class Domain2D():
             shape = self.operations[shapeID]
         
         if func is None:
-            points,triangles = triangulate_shape(shape,**kwargs)
+            if self.points is None:
+                points,triangles = triangulate_shape(shape,**kwargs)
+            else:
+                points,triangles = self.points,self.triangles
             out = generate_points_from_triangles(points,triangles,n)
         else:
             out =  func(n,shape,**kwargs)
@@ -119,6 +149,25 @@ class Domain2D():
             return out
         elif output_type == 'torch':
             return torch.tensor(out).to(torch.float32)
+
+
+    @staticmethod
+    def generate_points_from_line(line,num_points,random = True):
+        '''
+        Generate points on a line
+
+        shape: LineString | a list of two points in the form [[x1,y1],[x2,y2]]
+        '''
+        if random:
+            gen_points = rand(num_points)
+        else:
+            gen_points = np.linspace(0,1,num_points)
+
+        return torch.tensor([line.interpolate(d,normalized=True).coords[0] for d in gen_points ] )
+    @staticmethod
+    def generate_points_between_two_points(end_points,num_points,random = True):
+        line = LineString(end_points)
+        return Domain2D.generate_points_from_line(line,num_points,random)
 
 
 def is_tri_in_shape(points,triangles,shape):

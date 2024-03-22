@@ -1,1 +1,1 @@
-__all__ = ['geometry','continuous']
+__all__ = ['geometry','continuous','utils']
