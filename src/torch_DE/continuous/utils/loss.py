@@ -12,15 +12,21 @@ class Loss_handler():
         self.groups = set(groups)
         self.loss_groups = {loss_type : {} for loss_type in ['Boundary','Residual','Initial Condition','Periodic','Custom']}
         self.losses = {}
-
+        self.logger = {loss_type : [] for loss_type in ['Boundary','Residual','Initial Condition','Periodic','Custom']}
     def __call__(self,group_input,group_output,power =2):
         return self.calculate_losses(group_input,group_output,power)
 
+    def log_loss(self):
+        with torch.no_grad():
+            for loss_type,loss in zip(self.logger.keys(),self.losses.values()):
+                self.logger[loss_type].append(float(loss.cpu()))
+            
 
     def print_losses(self,i):
-        print('Epoch {i} :--: ')
+        print(f'Epoch {i} :--: ',end = '  ')
         for name,loss in self.losses.items():
-            print( f'{name} Loss: {float(loss): .3E}',end = '  ')
+            if loss != 0:
+                print( f'{name} Loss: {float(loss): .3E}',end = '  ')
         print()
 
     def calculate(self,group_input,group_output,power = 2):

@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from functorch import jacrev,jacfwd,vmap,make_functional
 from .Engines import *
+from typing import Union
+from .utils import Data_handler
 def aux_function(aux_func,is_aux = True) -> object:
     #aux_func has the output of (df,f) so we need it to output (df,(df,f))
     
@@ -111,51 +113,59 @@ class DE_Getter():
                 self.derivatives[deriv] = index
 
 
-    def set_deriv_method(self,deriv_method):
+    def set_deriv_method(self,deriv_method,**kwargs):
         '''
         Set how to generate the derivatives for the PINN. Note that derivatives to extract must be supplied before calling the derivative method
         
         deriv_method: string | engine Object method to use to extract the derivatives from the neural network. use the following strings for pre implemented engines:
             AD: (default) obtain the derivatives using automatic differentiation/backprop.
-            stein : Obtain gradients via stein's identity without backprop. Only works for first and second order derivatives
-            engine Object: Pass in yuor own engine object to extract derivatives see engine for more details
+            FD: Obtain the derivatives via finite difference. Currently only supports 2D and upto 2nd order non-mixed derivatives
 
+            stein : Obtain gradients via stein's identity without backprop. Only works for first and second order derivatives
+            
+            engine Object: Pass in yuor own engine object to extract derivatives. Must be already initialised
+
+            
+        kwargs: any keywords to initialize the engine. net and derivatives are automatically passed in
         '''
         if not isinstance(self.derivatives,dict):
             raise ValueError(f'The derivatives to extract has not been set properly instead a type of {type(self.derivatives)} was found')
-        if deriv_method == 'AD':
-            self.deriv_method = AD_engine(self.net,self.derivatives)
+        if isinstance(deriv_method,str):
+            if deriv_method  == 'AD':
+                self.deriv_method = AD_engine(self.net,self.derivatives)
+            elif deriv_method == 'FD':
+                pass
         elif isinstance(deriv_method,engine):
             self.deriv_method = deriv_method
         else:
-            raise TypeError('deriv_method should be an engine object or appropriate string')
+            raise TypeError('deriv_method should be an engine class or appropriate string')
 
 
 
 
-    def calculate(self,x : torch.tensor, groups:list =None,group_sizes: list = None, **kwargs) -> dict:
+    def calculate(self,x : Union[torch.tensor,dict,Data_handler], **kwargs) -> dict:
         '''
-        Extract the desired differentials from the neural network using ADE and functorch
+        Extract the desired differentials from the neural network using ADE and functorch. The Engine 
 
         Args:
-        x (torch.tensor) : input tensor. If groups and groups sizes is used, it should be a concatenated tensor of all groups of tensors in corresponding order \n
-        groups (list | tuple) : a list of names for each group of output. They should be ordered the same way x was concatenated. If none, then input tensor is treated as a single group. Must be used in conjunction with group_sizes \n
-        groups__sizes (list | tuple): a list of ints describing the different lengths of each group in the input tensor x. Must be used in conjunction with groups \n
+        x Union[torch.tensor,dict,Data_handler].
+            - torch.tensor:  
+            - dict | Data_handler. If the data is stored with a dict like object such as Data_handler (has dict methods keys(), values() and items()) then groups and group_sizes can be left blank
 
-        Returns:\n 
-        if groups == None:
-            output (dict) : a dictionary of the form output[derivative_name] = tensor
+        **kwargs: keyword arguments depending on the method to extract derivatives
 
-        if groups != None:
-            output (dict) : a dictionary containing another dictionary of the form output[group_name][derivative_name] = tensor
+        With Autodiff Engine built into Torch DE we have the following additional kwargs:
+
+        groups list | iterable : an ordered list or tuple of group names \\
+        group_sizes : a list or tuple containing the sizes of each group must be invoked if groups is not None
         
-        To Do:
-        Should the option of output[derivative_name][group_name] be considered?
-        - group_name dependent derivatives (e.g. for a no slip wall we would only care about the velocity u and v)
-        - Networks that have multiple inputs that maynot be tensors e.g. latent variables
-            
+        groups and groups sizes is used, it should be a concatenated tensor of all groups of tensors in corresponding order. if groups is None, all output is placed is place into one group
+
+        By default engines will concatenate the dictionary of different groups together to form one single batched tensor. Set cat = False
+
+        
         '''
-        return self.deriv_method.calculate(x, groups,group_sizes, **kwargs)
+        return self.deriv_method.calculate(x,**kwargs)
        
 
     def __call__(self, *args, **kwds) -> dict:

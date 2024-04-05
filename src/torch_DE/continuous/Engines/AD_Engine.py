@@ -1,7 +1,8 @@
 import torch
 from functorch import jacrev,jacfwd,vmap,make_functional
-from .diff_engine import engine
-
+from torch_DE.continuous.Engines import engine
+from typing import Union
+from torch_DE.continuous.utils import Data_handler
 class AD_engine(engine):
     def __init__(self,net,derivatives,**kwargs):
         super().__init__()
@@ -38,7 +39,10 @@ class AD_engine(engine):
             is_aux = True
         return derivative_function
 
-    def calculate(self,x : torch.tensor, groups:list =None,group_sizes: list = None, **kwargs):
+    def calculate(self,x : Union[torch.Tensor,dict,Data_handler], **kwargs):
+        
+        x,groups,group_sizes = self.cat_groups(x)
+
         out_tuple = vmap(self.autodiff_deriv_func)(x)
         #We get a nested tuple
         #Form is (nth derivative,(n-1,(n-2)...,(f(x))))
@@ -54,7 +58,7 @@ class AD_engine(engine):
             out_tuple = y_tuple
         #Last y_tuple is the network evaluation
         derivs.append(y_tuple)
-        
+        derivs = derivs[::-1]
         #Output is a dictionary with keys being the group name. We always have the 'all' group. value of output[key] is another dictionary where
         # the key is the derivative string (e.g. u_xx) and the value is the values for that derivative
         output = {'all' : self.assign_derivs(derivs)}
@@ -76,15 +80,21 @@ class AD_engine(engine):
         
 
     def assign_derivs(self,derivs):
-        
+        '''
+        Sort out the derivative output to place in dictionary form
+
+        derivs: list of tensors where each tensor represents the output/derivative of the PINN. The jth element represents the jth derivative. 
+            the 0th element represents the network evaluation u, 1st is u_x ... etc  
+        '''
+
         #Should I turn this into a one liner?
         output = {}
         
         for deriv_var,idx in self.derivatives.items(): 
             #Highest derivs are at 0 and last eval is at -1
-            order = len(idx)-1
-            j = self.highest_order-order
-
+            # order = len(idx)-1
+            # j = self.highest_order-order
+            j = len(idx) - 1
             # print(order,j,deriv_var)
             #Slice(None) python trick. Represents the ':' when indexing like A[:,1,2]
             index = (slice(None),) + idx

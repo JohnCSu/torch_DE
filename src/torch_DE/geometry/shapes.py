@@ -1,9 +1,11 @@
 from shapely.geometry import Polygon,Point, LineString
 from .sampling import *
 from scipy.spatial import Delaunay
+from scipy.interpolate import LinearNDInterpolator
 import matplotlib.pyplot as plt
 import torch
 from numpy.random import rand
+from torch_DE.continuous.utils import RegularGridInterpolator
 def Circle(center:tuple,r:float,num_points = 1024):
     return Point(center).buffer(r,num_points)
 
@@ -49,7 +51,7 @@ class Domain2D():
         #Create Lines from bounds
         self.boundary_groups = {}
         self.create_domain_exterior_edges()
-    
+        self.sdf = None
     def __getitem__(self,key):
         #Returns the coords of a part of the domain
         return self.operations[key]
@@ -71,6 +73,38 @@ class Domain2D():
         self.boolean_op(*shapes,names = names,op = 'add',inplace=True)
     def remove(self,*shapes,names= None):
         self.boolean_op(*shapes,names=names,op = 'sub',inplace=True)
+
+    def create_sdf(self,resolution: int = 256,device = 'cpu'):
+        '''
+        Creates a slightly modified SDF function for the current geometry. The SDF sets the values of points outside the geometry to zero tahter than be negative.
+
+        Note that this method uses a burte force approach using Shapely distance function. We create an aprroximate SDF from a uniform grid of 10,000 points \n
+        plus 2000 points from the boundary and then use scipy LinearNDInterpolator to create a interp field.
+
+        
+        Input:
+            Resolution: int (default = 256) Number of grid points in each X,Y direction to take
+            device: str (default = 'cpu') Device to put the grid on. Default cpu but can be set to cuda
+        Output:
+            SDF func(xy) where xy is a tensor of shape (N,2). The output of this function is a tensor of size (N) of the signed distances of each point.
+        '''
+        #We use a brute force method for SDF. Points outside the domain are set to zero. This is good enough for PINN applications
+        xmin,ymin,xmax,ymax = self.Domain.bounds
+        x,y = [torch.linspace(xmin,xmax,resolution),torch.linspace(ymin,ymax,resolution)]
+        X,Y = torch.meshgrid(x,y)
+        xg,yg = X.flatten(),Y.flatten()
+
+        points = [Point(x1,y1) for x1,y1 in zip(xg,yg)]
+        #Brute Force SDF
+        distance = torch.tensor(self.Domain.boundary.distance(points))
+        distance[~self.contains(points)] *= 0
+        
+        distance = distance.reshape((resolution,resolution)).to(device = device)
+
+        sdf = RegularGridInterpolator((x,y),distance)
+        sdf.set_device(device)
+
+        return sdf
 
     def boolean_op(self,*shapes,names=None,op = None,inplace = False):
         '''
@@ -139,6 +173,8 @@ class Domain2D():
         if func is None:
             if self.points is None:
                 points,triangles = triangulate_shape(shape,**kwargs)
+                #Cache the mesh
+                self.points,self.triangles=points,triangles 
             else:
                 points,triangles = self.points,self.triangles
             out = generate_points_from_triangles(points,triangles,n)

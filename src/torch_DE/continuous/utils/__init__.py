@@ -1,8 +1,9 @@
 from .data_handler import Data_handler
 from .loss import Loss_handler
 from .sampling import R3_sampler
+from .GridInterpolator import RegularGridInterpolator
 import inspect
-__all__ = ['data_handler','loss','sampling','Loss_handler','Data_handler','R3_sampler','get_derivatives']
+__all__ = ['data_handler','loss','sampling','Loss_handler','Data_handler','R3_sampler','get_derivatives','RegularGridInterpolator']
 
 def get_derivatives(input_vars,output_vars,*equations):
     remove_list = set(['kwargs'] + input_vars + output_vars)

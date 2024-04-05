@@ -1,12 +1,34 @@
 import torch
 from functorch import jacrev,jacfwd,vmap,make_functional
-
+from typing import Union,Dict,Iterable
+from torch_DE.continuous.utils import Data_handler
 class engine():
     def __init__(self) -> None:
         self.derivatives = None
         self.net = None
     def __call__(self,*args,**kwargs):
         return self.calculate(*args,**kwargs)
+
+    def cat_groups(self,x: Union[torch.tensor,dict,Data_handler]):
+        if isinstance(x,dict):
+            group_names,group_data,group_sizes = zip(*[(group,data,data.shape[0]) for group,data in x.items()])
+            return torch.cat(group_data),group_names,group_sizes
+        elif isinstance(x,torch.tensor):
+            return x,None,None
+        else:
+            raise ValueError(f'input should be of type dict or torch.tensor. Got instead {type(x)}')
+
+    def net_pass_from_dict(self,x_dict)->  Dict[str,Dict[str,torch.Tensor]]:
+        x,group_names,group_sizes = self.cat_groups(x_dict)
+        u = self.net(x)
+        #We need to put this back into dictionary format
+        output = {}
+        start_idx = 0
+        for group_name,size in zip(group_names,group_sizes):
+            output[group_name] = {output_var: u[start_idx:start_idx+size,i] for output_var,i in self.output_vars.items()}
+            start_idx += size
+        
+        return output
 
     def calculate(self):
         pass
