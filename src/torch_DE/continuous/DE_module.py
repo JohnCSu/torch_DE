@@ -23,7 +23,7 @@ def aux_function(aux_func,is_aux = True) -> object:
 
 
 class DE_Getter():
-    def __init__(self,net:nn.Module,input_vars :list = None , output_vars: list= None,derivatives: list= None,deriv_method = 'AD',*args, **kwargs) -> None:
+    def __init__(self,net:nn.Module,input_vars :list = None , output_vars: list= None,derivatives: list= None,*args, **kwargs) -> None:
         '''
         Object to extract derivatives from a pytorch network via AD. Simplifies the process by abstracting away indexing to get specific derivatives with
         a dictionary with strings as keys.
@@ -36,11 +36,7 @@ class DE_Getter():
         derivatives: List | tuple of strings of what derivatives to extract. The syntax is the dependent variable name followed by a number of independent variables.
         output and input variable are seperated by an underscore. For example, 'u_xx' will extract the second derivative of u with respect to x
 
-        deriv_method: string | engine Object method to use to extract the derivatives from the neural network. use the following strings for pre implemented engines:
-            AD: (default) obtain the derivatives using automatic differentiation/backprop.
-            stein : Obtain gradients via stein's identity without backprop. Only works for first and second order derivatives
-            engine Object: Pass in yuor own engine object to extract derivatives see engine for more details
-
+        By Default we use the Autodiff method to extract gradients. This can be changed useing the method set_deriv_method()
         '''
         # super().__init__()
         self.net = net
@@ -49,9 +45,7 @@ class DE_Getter():
             self.set_vars(input_vars,output_vars)
         if derivatives is not None:
             self.set_derivatives(derivatives)
-            self.set_deriv_method(deriv_method)
-        
-        
+            
         
     def set_vars(self,input_vars: iter,output_vars: iter,net_check = True):
         self.input_vars = input_vars
@@ -96,7 +90,8 @@ class DE_Getter():
             #Work out the derivatives we need 
             self.get_deriv_index(dep_var,tuple(indep_vars))
 
-
+        self.set_deriv_method('AD')
+        
     def get_deriv_index(self,dep_var:str,indep_vars: list)-> None: 
         # ignoring batch dimension
         # Input will be : ('u',['x','x'] )
@@ -113,17 +108,16 @@ class DE_Getter():
                 self.derivatives[deriv] = index
 
 
-    def set_deriv_method(self,deriv_method,**kwargs):
+    def set_deriv_method(self,deriv_method):
         '''
         Set how to generate the derivatives for the PINN. Note that derivatives to extract must be supplied before calling the derivative method
         
-        deriv_method: string | engine Object method to use to extract the derivatives from the neural network. use the following strings for pre implemented engines:
-            AD: (default) obtain the derivatives using automatic differentiation/backprop.
-            FD: Obtain the derivatives via finite difference. Currently only supports 2D and upto 2nd order non-mixed derivatives
-
-            stein : Obtain gradients via stein's identity without backprop. Only works for first and second order derivatives
-            
-            engine Object: Pass in yuor own engine object to extract derivatives. Must be already initialised
+        deriv_method: string | engine Object method to use to extract the derivatives from the neural network
+            'AD' string to use automatic differentiation/backprop to extract gradients
+                        
+            engine Object: Pass in your own engine object to extract derivatives. Must be already initialised
+                Torch DE has the following engines built in:
+                    FD_engine: Obtain the derivatives via finite difference. Currently only supports upto 2nd order non-mixed derivatives
 
             
         kwargs: any keywords to initialize the engine. net and derivatives are automatically passed in
@@ -132,9 +126,7 @@ class DE_Getter():
             raise ValueError(f'The derivatives to extract has not been set properly instead a type of {type(self.derivatives)} was found')
         if isinstance(deriv_method,str):
             if deriv_method  == 'AD':
-                self.deriv_method = AD_engine(self.net,self.derivatives)
-            elif deriv_method == 'FD':
-                pass
+                self.deriv_method = AD_engine(self.net,self.derivatives,self.output_vars)
         elif isinstance(deriv_method,engine):
             self.deriv_method = deriv_method
         else:
@@ -154,14 +146,9 @@ class DE_Getter():
 
         **kwargs: keyword arguments depending on the method to extract derivatives
 
-        With Autodiff Engine built into Torch DE we have the following additional kwargs:
-
-        groups list | iterable : an ordered list or tuple of group names \\
-        group_sizes : a list or tuple containing the sizes of each group must be invoked if groups is not None
-        
-        groups and groups sizes is used, it should be a concatenated tensor of all groups of tensors in corresponding order. if groups is None, all output is placed is place into one group
-
-        By default engines will concatenate the dictionary of different groups together to form one single batched tensor. Set cat = False
+        Autodiff (AD) and  Finite Difference (FD) Engine are built into Torch DE and have the following additional kwargs:
+        target group: str. The group to be differentiated. if not all points will be differentiated. 
+                    This is optional for AD engine but required for FD engine if a dictionary like data input is given.
 
         
         '''

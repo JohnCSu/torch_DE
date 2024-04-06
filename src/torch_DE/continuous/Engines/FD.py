@@ -2,9 +2,9 @@ from typing import Dict,Callable,Iterable
 from torch_DE.continuous.Engines import engine
 import torch
 class FD_engine(engine):
-    def __init__(self,net:torch.nn.Module,derivatives:Dict,dxs:Iterable,sdf:Callable = None,dims:int = 2) -> None:
+    def __init__(self,net:torch.nn.Module,derivatives:Dict,dxs:Iterable,sdf:Callable = None,target_group = None) -> None:
         super().__init__()
-        self.dims = dims
+        self.dims = len(dxs)
         if sdf is None:
             self.sdf = lambda x: float('inf')*torch.ones(x.shape[0]).to(x.device)
         else:
@@ -12,18 +12,15 @@ class FD_engine(engine):
         
         self.net = net
         self.derivatives = derivatives.copy()
-        self.output_vars = self.get_output_vars() 
-        
+        self.output_vars = self.get_output_vars(self.derivatives) 
+
         #Delete the keys that are the output variables
         for output_var in self.output_vars.keys():
             self.derivatives.pop(output_var)
         
+        self.target_group = target_group
         self.initial_step(*dxs)
-    def get_output_vars(self):
-        return {output_var: idx[0] for output_var,idx in self.derivatives.items() if output_var.split('_')[0] == output_var}
-
-
-
+ 
     def initial_step(self,*dxs) -> None:
         assert len(dxs) == self.dims, f'Engine is for a PINN of dimension {self.dims}. Got dxs of length {len(dxs)} instead'
         self.dxs = torch.tensor(dxs)
@@ -45,8 +42,10 @@ class FD_engine(engine):
         return self.get_derivs(u,u_adj,dxs)
     
 
-    def calculate(self,x,target_group = None):
+    def calculate(self,x,target_group = None,**kwargs):
         #We only want to do this to the collocation points
+        self.target_group = target_group
+
         if isinstance(x,dict):
             output = self.net_pass_from_dict(x)
             x_fd = x[target_group]

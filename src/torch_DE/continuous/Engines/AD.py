@@ -1,14 +1,14 @@
 import torch
 from functorch import jacrev,jacfwd,vmap,make_functional
 from torch_DE.continuous.Engines import engine
-from typing import Union
+from typing import Union,Dict
 from torch_DE.continuous.utils import Data_handler
 class AD_engine(engine):
     def __init__(self,net,derivatives,**kwargs):
         super().__init__()
         self.net = net
         self.derivatives = derivatives
-        
+        self.output_vars = self.get_output_vars(derivatives)
         self.highest_order = self.find_highest_order(derivatives)
         self.autodiff_deriv_func = self.compose_autodiff_deriv_func(net)
             
@@ -39,16 +39,38 @@ class AD_engine(engine):
             is_aux = True
         return derivative_function
 
-    def calculate(self,x : Union[torch.Tensor,dict,Data_handler], **kwargs):
-        
-        x,groups,group_sizes = self.cat_groups(x)
+    def calculate(self,x : Union[torch.Tensor,dict,Data_handler], target_group:str = None, **kwargs) -> Dict[str, Dict[str,torch.Tensor]]:
+        '''
+        Calculate derivatives using autodiff via functorch
 
+        Input:
+            x: Union[torch.Tensor,dict,Data_handler]: either tensor or a dictionary of tensors represent input to the network 
+            target group: str (default None) The group that will be differentiated via autodiff. if None all inputs are differentiated
+
+        Returns
+            Output_dict: Dict
+        '''
+        if isinstance(x,dict):
+            if target_group is not None:
+                derivs = self.autodiff(x[target_group])
+                output_derivs = self.group_output(derivs,target_group=target_group)
+                output_dict = self.net_pass_from_dict(x,exclude = target_group )
+                output_dict.update(output_derivs)
+
+            else:
+                x,groups,group_sizes = self.cat_groups(x)
+                output_dict = self.group_output(self.autodiff(x),groups,group_sizes)
+        elif isinstance(x,torch.Tensor):
+            output_dict = self.group_output(self.autodiff(x),target_group= target_group)
+
+        return output_dict
+        
+    def autodiff(self,x:torch.Tensor):
+        
         out_tuple = vmap(self.autodiff_deriv_func)(x)
         #We get a nested tuple
         #Form is (nth derivative,(n-1,(n-2)...,(f(x))))
-        #Need to unwrap into a single tuple
-
-        #Example of u_xx and u_x call for x^2
+        #Need to unwrap into a single tuple and reverse order
 
         derivs = []
         #Denest the tuple (Should change to a generator function so looks nicer and avoids appending)
@@ -56,12 +78,14 @@ class AD_engine(engine):
             dy,y_tuple = out_tuple
             derivs.append(dy)
             out_tuple = y_tuple
-        #Last y_tuple is the network evaluation
+        #Last y_tuple is the network evaluation so we need to reverse the order so the ith element in the tuple is the ith derivative
         derivs.append(y_tuple)
-        derivs = derivs[::-1]
+        return derivs[::-1]
+        
+    def group_output(self,derivs,groups=None,group_sizes=None,target_group = None):
         #Output is a dictionary with keys being the group name. We always have the 'all' group. value of output[key] is another dictionary where
         # the key is the derivative string (e.g. u_xx) and the value is the values for that derivative
-        output = {'all' : self.assign_derivs(derivs)}
+        output = {'all' if target_group is None else target_group : self.assign_derivs(derivs)}
         #From Group size determine start of batching
 
         if groups is None:
@@ -75,7 +99,6 @@ class AD_engine(engine):
             output[group] = self.assign_derivs(group_deriv)
             idx_start = idx_end
         
-            
         return output
         
 

@@ -6,20 +6,23 @@ class engine():
     def __init__(self) -> None:
         self.derivatives = None
         self.net = None
+        self.output_vars = None
     def __call__(self,*args,**kwargs):
         return self.calculate(*args,**kwargs)
 
-    def cat_groups(self,x: Union[torch.tensor,dict,Data_handler]):
+    def cat_groups(self,x: Union[torch.tensor,dict,Data_handler],exclude = None):
         if isinstance(x,dict):
-            group_names,group_data,group_sizes = zip(*[(group,data,data.shape[0]) for group,data in x.items()])
+            group_names,group_data,group_sizes = zip(*[(group,data,data.shape[0]) for group,data in x.items() if group != exclude])
             return torch.cat(group_data),group_names,group_sizes
         elif isinstance(x,torch.tensor):
             return x,None,None
         else:
             raise ValueError(f'input should be of type dict or torch.tensor. Got instead {type(x)}')
+    
 
-    def net_pass_from_dict(self,x_dict)->  Dict[str,Dict[str,torch.Tensor]]:
-        x,group_names,group_sizes = self.cat_groups(x_dict)
+    def net_pass_from_dict(self,x_dict,exclude = None)->  Dict[str,Dict[str,torch.Tensor]]:
+        
+        x,group_names,group_sizes = self.cat_groups(x_dict,exclude=exclude)
         u = self.net(x)
         #We need to put this back into dictionary format
         output = {}
@@ -29,8 +32,12 @@ class engine():
             start_idx += size
         
         return output
+    @staticmethod
+    def get_output_vars(derivatives:dict):
+        return {output_var: idx[0] for output_var,idx in derivatives.items() if output_var.split('_')[0] == output_var}
 
-    def calculate(self):
+
+    def calculate(self,x,**kwargs):
         pass
     
     def find_highest_order(self,derivatives):

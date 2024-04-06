@@ -19,7 +19,8 @@ class Loss_handler():
     def log_loss(self):
         with torch.no_grad():
             for loss_type,loss in zip(self.logger.keys(),self.losses.values()):
-                self.logger[loss_type].append(float(loss.cpu()))
+                if loss != 0:
+                    self.logger[loss_type].append(float(loss.cpu()))
             
 
     def print_losses(self,i):
