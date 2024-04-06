@@ -1,4 +1,4 @@
-from typing import Dict,Callable,Iterable
+from typing import Dict,Callable,Iterable,Union,List
 from torch_DE.continuous.Engines import engine
 import torch
 class FD_engine(engine):
@@ -26,9 +26,14 @@ class FD_engine(engine):
         self.dxs = torch.tensor(dxs)
     
     
-    def finite_diff(self,x):
+    def finite_diff(self,x:Union[torch.Tensor,dict]) -> dict:
+        '''
+        For Finite Difference we need the following steps:
+            1. Generate the stencil (i.e. adjacent points like x+h,x-h)
+            2. Get output of said stencils
+            3. Calculate the derivatives via Finite Difference
+        '''
         x_len = x.shape[0]
-
         #In order of dxs and then in order of x-dx,x+dx, Group them together for efficient network fwd pass
         stencil,dxs = self.generate_stencil(x,self.dxs,self.sdf)
         xs = torch.cat([torch.cat(x,dim=0) for x in stencil])
@@ -42,8 +47,17 @@ class FD_engine(engine):
         return self.get_derivs(u,u_adj,dxs)
     
 
-    def calculate(self,x,target_group = None,**kwargs):
-        #We only want to do this to the collocation points
+    def calculate(self,x:Union[torch.Tensor,dict],target_group:str = None,**kwargs) -> Dict[str,Dict[str,torch.Tensor]]:
+        '''
+        Calculate derivatives using Finite differences
+
+        Input:
+            x: Union[torch.Tensor,dict,Data_handler]: either tensor or a dictionary of tensors represent input to the network 
+            target group: str (default None) The group that will be differentiated via autodiff. if None all inputs are differentiated
+
+        Returns
+            Output_dict: Dict
+        '''
         self.target_group = target_group
 
         if isinstance(x,dict):
@@ -55,7 +69,7 @@ class FD_engine(engine):
             return {target_group if target_group is not None else 'all': self.finite_diff(x)}
 
 
-    def get_derivs(self,u,u_adj,dxs):
+    def get_derivs(self,u:torch.Tensor,u_adj:List[torch.Tensor],dxs:List[torch.Tensor]) -> Dict[str,torch.Tensor]:
         group_dict = {}
         for deriv_val,idx in self.derivatives.items():
             #i gives the output var index, j the index of input var
@@ -78,7 +92,7 @@ class FD_engine(engine):
         return group_dict
     @staticmethod
     def generate_stencil(x,dxs,sdf):
-        #xs = [(N),(N),...]
+        
         sdf_d = sdf(x)
 
         dxs = [torch.minimum(sdf_d,dx).to(x.device) for dx in dxs]
@@ -93,11 +107,13 @@ class FD_engine(engine):
     
 
     @staticmethod
-    def first_derivative(u1,u2,u3,h):
+    def first_derivative(u1,u2,u3,h) -> torch.Tensor:
+        ''' Central First difference method. All inputs are tensors'''
         # We have a 3 point stencil u1 -> u_(x-1),u2 -> u_(x),u3 -> u_(x+1)
         return (u3 - u1)/(2*h)
     
     @staticmethod
     def second_derivative(u1,u2,u3,h):
+        ''' Central Second Order difference method. All inputs are tensors'''
         return (u1 -2*u2 + u3)/(h.pow(2))
     

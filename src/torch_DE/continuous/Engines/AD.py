@@ -1,7 +1,7 @@
 import torch
 from functorch import jacrev,jacfwd,vmap,make_functional
 from torch_DE.continuous.Engines import engine
-from typing import Union,Dict
+from typing import Union,Dict,List,Callable
 from torch_DE.continuous.utils import Data_handler
 class AD_engine(engine):
     def __init__(self,net,derivatives,**kwargs):
@@ -18,7 +18,7 @@ class AD_engine(engine):
         self.highest_order = self.find_highest_order(derivatives)
             
 
-    def compose_autodiff_deriv_func(self,net):
+    def compose_autodiff_deriv_func(self,net:torch.nn.Module) -> Callable:
         '''
         Creates the function that when a tensor is passed into the function, it returns all the gradients up to the highest order. Note that this return ALL
         gradients (i.e the jacobian or Hessian) so another function is needed to pick out the gradients you really want
@@ -65,8 +65,13 @@ class AD_engine(engine):
 
         return output_dict
         
-    def autodiff(self,x:torch.Tensor):
-        
+    def autodiff(self,x:torch.Tensor) -> List[torch.Tensor]:
+        '''
+        When using functorch, the output is wrapped in a nested tuples of size 2 e.g Form is (nth derivative,(n-1,(n-2)...,(f(x))))
+        and is reveresed so the network evaluation ("0th derivative") is the last element (deepest tuple)
+
+        Goal of function is to unwrap this tuple and then reverse the order so the jth element corresponds to the jth derivative
+        '''
         out_tuple = vmap(self.autodiff_deriv_func)(x)
         #We get a nested tuple
         #Form is (nth derivative,(n-1,(n-2)...,(f(x))))
@@ -82,7 +87,10 @@ class AD_engine(engine):
         derivs.append(y_tuple)
         return derivs[::-1]
         
-    def group_output(self,derivs,groups=None,group_sizes=None,target_group = None):
+    def group_output(self,derivs:Dict[str,torch.Tensor],groups:str=None,group_sizes:List =None,target_group:str = None) -> Dict[str,Dict[str,torch.Tensor]]:
+        '''
+        Put the output data into a nicely formatted dictionary so we don't have to use indexing
+        '''
         #Output is a dictionary with keys being the group name. We always have the 'all' group. value of output[key] is another dictionary where
         # the key is the derivative string (e.g. u_xx) and the value is the values for that derivative
         output = {'all' if target_group is None else target_group : self.assign_derivs(derivs)}
@@ -102,7 +110,7 @@ class AD_engine(engine):
         return output
         
 
-    def assign_derivs(self,derivs):
+    def assign_derivs(self,derivs:Dict[str,torch.Tensor]) -> Dict[str,torch.Tensor] :
         '''
         Sort out the derivative output to place in dictionary form
 
@@ -112,15 +120,10 @@ class AD_engine(engine):
 
         #Should I turn this into a one liner?
         output = {}
-        
         for deriv_var,idx in self.derivatives.items(): 
-            #Highest derivs are at 0 and last eval is at -1
-            # order = len(idx)-1
-            # j = self.highest_order-order
+            #The jth element represents the jth order derivative
             j = len(idx) - 1
-            # print(order,j,deriv_var)
             #Slice(None) python trick. Represents the ':' when indexing like A[:,1,2]
             index = (slice(None),) + idx
-
             output[deriv_var] = derivs[j][index] 
         return output

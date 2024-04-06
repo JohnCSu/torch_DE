@@ -1,6 +1,6 @@
 import torch
 from functorch import jacrev,jacfwd,vmap,make_functional
-from typing import Union,Dict,Iterable
+from typing import Union,Dict,Iterable,Tuple,List
 from torch_DE.continuous.utils import Data_handler
 class engine():
     def __init__(self) -> None:
@@ -10,7 +10,14 @@ class engine():
     def __call__(self,*args,**kwargs):
         return self.calculate(*args,**kwargs)
 
-    def cat_groups(self,x: Union[torch.tensor,dict,Data_handler],exclude = None):
+    def cat_groups(self,x: Union[torch.tensor,dict,Data_handler],exclude = None) -> Tuple[torch.Tensor,Union[None,List[str]],Union[None,List[int]]]:
+        '''
+        merges all the different tensors into one big concatenated tensor along batch dimension (assumes that first dimenstion is batch dimension)
+        also creates a list of group names and sizes.
+
+        if exclude is a str then that group is excluded (use if that excluded group is to be Differentiated)
+        
+        '''
         if isinstance(x,dict):
             group_names,group_data,group_sizes = zip(*[(group,data,data.shape[0]) for group,data in x.items() if group != exclude])
             return torch.cat(group_data),group_names,group_sizes
@@ -21,7 +28,9 @@ class engine():
     
 
     def net_pass_from_dict(self,x_dict,exclude = None)->  Dict[str,Dict[str,torch.Tensor]]:
-        
+        '''
+        Allow passing a dict like object containing tensors to a network and output the results into a dictionary with the same keys as the input
+        '''
         x,group_names,group_sizes = self.cat_groups(x_dict,exclude=exclude)
         u = self.net(x)
         #We need to put this back into dictionary format
@@ -55,6 +64,9 @@ class engine():
     
 
     def aux_function(self,aux_func,is_aux = True) -> object:
+        '''
+        Use for functorch functions to we can get the differentiated output as well as the network evaluation
+        '''
     #aux_func has the output of (df,f) so we need it to output (df,(df,f))
     
         def initial_aux_func(x:torch.tensor) -> tuple[torch.tensor,torch.tensor]:
