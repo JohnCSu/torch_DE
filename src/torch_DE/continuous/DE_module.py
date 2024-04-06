@@ -126,7 +126,7 @@ class DE_Getter():
             raise ValueError(f'The derivatives to extract has not been set properly instead a type of {type(self.derivatives)} was found')
         if isinstance(deriv_method,str):
             if deriv_method  == 'AD':
-                self.deriv_method = AD_engine(self.net,self.derivatives,self.output_vars)
+                self.deriv_method = AD_engine(self.net,self.derivatives)
         elif isinstance(deriv_method,engine):
             self.deriv_method = deriv_method
         else:

@@ -23,8 +23,8 @@ class Loss_handler():
                     self.logger[loss_type].append(float(loss.cpu()))
             
 
-    def print_losses(self,i):
-        print(f'Epoch {i} :--: ',end = '  ')
+    def print_losses(self,epoch):
+        print(f'Epoch {epoch} :--: ',end = '  ')
         for name,loss in self.losses.items():
             if loss != 0:
                 print( f'{name} Loss: {float(loss): .3E}',end = '  ')
@@ -97,6 +97,11 @@ class Loss_handler():
         for res_name,res_func in res_dict.items():
             loss_group[group][res_name] = self.residual_loss_func(group,res_func,weighting) 
 
+    def add_initial_condition(self,group:str,ic_dict:dict,weighting = 1):
+        loss_group = self.group_checker('Initial Condition',group)
+
+        for var_comp,value_func in ic_dict.items():
+            loss_group[group][var_comp] = self.data_loss_func(group,var_comp,value_func,weighting)
 
 
     def add_periodic(self,group_1:str,group_2:str,var:str,weighting = 1):
@@ -113,12 +118,7 @@ class Loss_handler():
         else:
             raise TypeError(f'varaible var needs to be type string or iterable. Instead found type f{type(var)}')
 
-    def add_initial_condition(self,group:str,ic_dict:dict,weighting = 1):
-        loss_group = self.group_checker('Initial Condition',group)
-
-        for var_comp,value_func in ic_dict.items():
-            loss_group[group][var_comp] = self.data_loss_func(group,var_comp,value_func,weighting)
-
+    
 
     def group_checker(self,loss_type,group):
             assert group in self.groups, "The group {group} does not exist in the loss handler. Please check your spelling"

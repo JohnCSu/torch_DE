@@ -1,11 +1,13 @@
 from shapely.geometry import Polygon,Point, LineString
 from .sampling import *
 from scipy.spatial import Delaunay
-from scipy.interpolate import LinearNDInterpolator
+
 import matplotlib.pyplot as plt
 import torch
 from numpy.random import rand
 from torch_DE.continuous.utils import RegularGridInterpolator
+import geopandas as gdp
+
 def Circle(center:tuple,r:float,num_points = 1024):
     return Point(center).buffer(r,num_points)
 
@@ -205,6 +207,14 @@ class Domain2D():
         line = LineString(end_points)
         return Domain2D.generate_points_from_line(line,num_points,random)
 
+
+    def plot(self,exterior= False, **kwargs):
+        self.plotter = gdp.GeoSeries(self.Domain)
+        
+        if exterior:
+            self.plotter.boundary.plot(**kwargs)
+        else:
+            self.plotter.plot(**kwargs)
 
 def is_tri_in_shape(points,triangles,shape):
     for triangle in triangles:
