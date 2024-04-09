@@ -1,4 +1,4 @@
-from .Get_Derivatives import get_derivatives
+from torch_DE.Equations.Get_Derivatives import get_derivatives
 def get_NavierStokes(dims:int = 2,steady_state:bool = False,incompressible:bool = True,Re= None):
     '''
     Returns the Reynold non-dimensional NavierStokes equations and other helpful things for dims upto 3
@@ -49,16 +49,15 @@ def get_NavierStokes(dims:int = 2,steady_state:bool = False,incompressible:bool 
         main_var_t_arg = f",{main_var_t}," if main_var_t != '' else ','
         
         func_code = f'''def {function_name}({','.join(vels_in_dim)}{main_var_t_arg}{','.join(derivs_1)},{','.join(derivs_2)},{pressure_grads[i]},{Re},**kwargs):\n\treturn {NS}'''
-        print(func_code)
         
 
         compiled_func = compile(func_code,'<string>','exec')
-        exec(compiled_func,functions)
+        exec(compiled_func,locals(),functions)
     
     diverg = [f'{vels[i]}_{indep_vars[i]}' for i in range(dims)]
     incompres = f'''def incompressible({','.join(diverg)},**kwargs):\n\t return {'+'.join(diverg)}'''
     incomp_compile = compile(incompres,'<string>','exec')
-    exec(incomp_compile,functions)
+    exec(incomp_compile,locals(),functions)
 
     
     input_vars = indep_vars[0:dims] + ('t',) if not steady_state else indep_vars[0:dims]
@@ -68,3 +67,7 @@ def get_NavierStokes(dims:int = 2,steady_state:bool = False,incompressible:bool 
     return tuple(input_vars),tuple(output_vars),derivatives,functions
 
 
+if __name__ == '__main__':
+    
+    a,b,c,d = get_NavierStokes(2,steady_state=True,Re=100)
+    print('hi')

@@ -1,6 +1,6 @@
 import inspect
 def get_derivatives(input_vars,output_vars,*equations,merge = True) -> tuple:
-    remove_list = set(['kwargs'] + input_vars + output_vars)
+    remove_list = set(['kwargs'] + list(input_vars) + list(output_vars))
 
     derivatives = {}
     for equation in equations:
