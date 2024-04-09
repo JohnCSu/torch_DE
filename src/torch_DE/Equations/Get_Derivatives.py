@@ -1,10 +1,5 @@
-from .data_handler import Data_handler
-from .loss import Loss_handler
-from .sampling import R3_sampler
-from .GridInterpolator import RegularGridInterpolator
 import inspect
-__all__ = ['data_handler','loss','sampling','Loss_handler','Data_handler','R3_sampler','RegularGridInterpolator']
-def get_derivatives(input_vars,output_vars,*equations,merge = True) -> set:
+def get_derivatives(input_vars,output_vars,*equations,merge = True) -> tuple:
     remove_list = set(['kwargs'] + input_vars + output_vars)
 
     derivatives = {}
@@ -37,8 +32,7 @@ def get_derivatives(input_vars,output_vars,*equations,merge = True) -> set:
         derivs = set()
         for dydx in derivatives.values():
             derivs.update(dydx)
-        return derivs
+        return tuple(derivs)
     
-    return derivatives
-
+    return tuple(derivatives)
 

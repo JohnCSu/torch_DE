@@ -208,13 +208,14 @@ class Domain2D():
         return Domain2D.generate_points_from_line(line,num_points,random)
 
 
-    def plot(self,exterior= False, **kwargs):
+    def plot(self,exterior= False,boundary_groups = False, **kwargs):
         self.plotter = gdp.GeoSeries(self.Domain)
         
         if exterior:
             self.plotter.boundary.plot(**kwargs)
         else:
             self.plotter.plot(**kwargs)
+
 
 def is_tri_in_shape(points,triangles,shape):
     for triangle in triangles:

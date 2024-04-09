@@ -147,8 +147,8 @@ class DE_Getter():
         **kwargs: keyword arguments depending on the method to extract derivatives
 
         Autodiff (AD) and  Finite Difference (FD) Engine are built into Torch DE and have the following additional kwargs:
-        target group: str. The group to be differentiated. if not all points will be differentiated. 
-                    This is optional for AD engine but required for FD engine if a dictionary like data input is given.
+            - target group: str. The group to be differentiated. if not all points will be differentiated.\n 
+                This is optional for AD engine but required for FD engine if a dictionary like data input is given.
 
         
         '''
