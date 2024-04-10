@@ -1,4 +1,4 @@
-from torch_DE.Equations.Get_Derivatives import get_derivatives
+from torch_DE.equations.Get_Derivatives import get_derivatives
 def get_NavierStokes(dims:int = 2,steady_state:bool = False,incompressible:bool = True,Re= None):
     '''
     Returns the Reynold non-dimensional NavierStokes equations and other helpful things for dims upto 3

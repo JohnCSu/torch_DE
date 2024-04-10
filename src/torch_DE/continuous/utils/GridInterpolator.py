@@ -33,13 +33,14 @@ class RegularGridInterpolator:
         for i, p in enumerate(self.points):
             assert isinstance(p, torch.Tensor)
             assert p.shape[0] == self.values.shape[i]
+        self.device = 'cpu'
     def set_device(self,device):
         '''
         Change the device the points are on. Usual choices are cpu or cuda
         '''
         self.points = [p.to(device = device) for p in self.points]
         self.values = self.values.to(device = device)
-
+        self.device = device
     def __call__(self, xy):
         '''
         Input

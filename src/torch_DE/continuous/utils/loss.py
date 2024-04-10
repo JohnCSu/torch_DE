@@ -105,7 +105,7 @@ class Loss_handler():
             print( f'{name} Loss: {float(loss): .3E}',end = '  ')
         print()
 
-    def calculate(self,group_input:Dict,group_output:Dict,power:int = 2,output_type:str='sum'):
+    def calculate(self,group_input:Dict,group_output:Dict,power:int = 2,output_type:str=None)->Loss:
         '''
         Calculate losses. In Loss Handler we store terms in a 3-nested dictionary so accessing indiviudual terms is loss_type -> group__name -> var_name -> Output
         Inputs:

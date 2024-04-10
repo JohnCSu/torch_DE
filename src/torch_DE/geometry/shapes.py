@@ -103,10 +103,30 @@ class Domain2D():
         
         distance = distance.reshape((resolution,resolution)).to(device = device)
 
-        sdf = RegularGridInterpolator((x,y),distance)
-        sdf.set_device(device)
+        self.sdf = RegularGridInterpolator((x,y),distance)
+        self.sdf.set_device(device)
 
-        return sdf
+        return self.sdf
+
+    def plot_sdf(self):
+        if self.sdf is None:
+            raise ValueError('SDF has not been defined yet!')
+        
+        device = self.sdf.device
+
+        self.sdf.set_device('cpu')
+        xmin,ymin,xmax,ymax = self.Domain.bounds
+        X,Y = torch.meshgrid(torch.linspace(xmin,xmax,100),torch.linspace(ymin,ymax,100))
+        x,y = X.flatten(),Y.flatten()
+
+        a = torch.stack((x,y),dim = -1).cpu()
+        z = self.sdf(a)
+        plt.gca().set_aspect('equal')
+        plt.tricontourf(x.cpu(),y.cpu(),z.cpu(),levels = 100,cmap = 'jet')
+        plt.title('SDF of Domain (points outside domain map to zero)')
+        plt.colorbar()
+        plt.show()
+        self.sdf.set_device(device)
 
     def boolean_op(self,*shapes,names=None,op = None,inplace = False):
         '''
