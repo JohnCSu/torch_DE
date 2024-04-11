@@ -2,6 +2,7 @@ from shapely.geometry import Polygon,Point, LineString
 from .sampling import *
 from scipy.spatial import Delaunay
 
+from typing import Callable
 import matplotlib.pyplot as plt
 import torch
 from numpy.random import rand
@@ -177,7 +178,7 @@ class Domain2D():
         self.points,self.triangles = (None,None)
         print('mesh cleared')
 
-    def generate_points(self,n,shapeID = None,func = None,output_type = 'torch',**kwargs):
+    def generate_points(self,n:int,shapeID:str = None,func:Callable = None,output_type:str = 'torch',seed:int = None,**kwargs):
         '''
         sample points from domain. Default triangulates the domain and then samples from the
             triangulated domain or specified Group Shape.
@@ -187,6 +188,9 @@ class Domain2D():
         sample, shape is some Polygon object followed by any other keyword arguements
         
         '''
+        if seed is not None:
+            np.random.seed(seed)
+            
         if shapeID is None:
             shape = self.Domain
         else:
