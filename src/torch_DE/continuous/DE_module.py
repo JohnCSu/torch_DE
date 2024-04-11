@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from functorch import jacrev,jacfwd,vmap,make_functional
 from .Engines import *
 from typing import Union
 from .utils import Data_handler
