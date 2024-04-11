@@ -1,7 +1,7 @@
 import torch
-from functorch import jacrev,jacfwd,vmap,make_functional
+from torch.func import jacrev,jacfwd,vmap
 from torch_DE.continuous.Engines import engine
-from typing import Union,Dict,List,Callable
+from typing import Union,Dict,List,Callable,Iterable
 from torch_DE.continuous.utils import Data_handler
 class AD_engine(engine):
     def __init__(self,net,derivatives,**kwargs):
@@ -39,7 +39,7 @@ class AD_engine(engine):
             is_aux = True
         return derivative_function
 
-    def calculate(self,x : Union[torch.Tensor,dict,Data_handler], target_group:str = None, **kwargs) -> Dict[str, Dict[str,torch.Tensor]]:
+    def calculate(self,x : Union[torch.Tensor,dict,Data_handler], target_groups:Union[str,List,tuple] = None, **kwargs) -> Dict[str, Dict[str,torch.Tensor]]:
         '''
         Calculate derivatives using autodiff via functorch
 
@@ -51,10 +51,12 @@ class AD_engine(engine):
             Output_dict: Dict
         '''
         if isinstance(x,dict):
-            if target_group is not None:
-                derivs = self.autodiff(x[target_group])
-                output_derivs = self.group_output(derivs,target_group=target_group)
-                output_dict = self.net_pass_from_dict(x,exclude = target_group )
+            if target_groups is not None:
+                target_groups = [target_groups] if isinstance(target_groups,str) else target_groups 
+                x_d,groups,group_sizes = self.cat_groups({target_group:x[target_group] for target_group in target_groups })
+                derivs = self.autodiff(x_d)
+                output_derivs = self.group_output(derivs,groups,group_sizes)
+                output_dict = self.net_pass_from_dict(x,exclude = target_groups )
                 output_dict.update(output_derivs)
 
             else:

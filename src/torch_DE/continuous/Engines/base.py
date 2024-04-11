@@ -10,7 +10,7 @@ class engine():
     def __call__(self,*args,**kwargs):
         return self.calculate(*args,**kwargs)
 
-    def cat_groups(self,x: Union[torch.tensor,dict,Data_handler],exclude = None) -> Tuple[torch.Tensor,Union[None,List[str]],Union[None,List[int]]]:
+    def cat_groups(self,x: Union[torch.tensor,dict,Data_handler],exclude:str = None) -> Tuple[torch.Tensor,Union[None,List[str]],Union[None,List[int]]]:
         '''
         merges all the different tensors into one big concatenated tensor along batch dimension (assumes that first dimenstion is batch dimension)
         also creates a list of group names and sizes.
@@ -19,7 +19,8 @@ class engine():
         
         '''
         if isinstance(x,dict):
-            group_names,group_data,group_sizes = zip(*[(group,data,data.shape[0]) for group,data in x.items() if group != exclude])
+            exclude = [exclude] if isinstance(exclude,(str)) or exclude is None else exclude
+            group_names,group_data,group_sizes = zip(*[(group,data,data.shape[0]) for group,data in x.items() if group not in exclude])
             return torch.cat(group_data),group_names,group_sizes
         elif isinstance(x,torch.tensor):
             return x,None,None
