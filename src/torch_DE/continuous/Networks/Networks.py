@@ -101,12 +101,36 @@ class Modified_Fourier_Net(DE_Module):
         return self.linear_out(H)
     
 
+
+class Wang_Net(DE_Module):
+    '''
+    A variation of the network proposed by Wang et al: https://arxiv.org/abs/2001.04536 
+    '''
+    def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers: int,activation = 'tanh',adaptive_activation = False) -> None:
+        super().__init__()
+        self.U = nn.Linear(in_features,hidden_features)
+        self.H_0 = nn.Linear(in_features,hidden_features)
+        self.V = nn.Linear(in_features,hidden_features)
+        self.activation = self.set_activation_function(activation,adaptive_activation)
+        self.H_layers = nn.ModuleList([nn.Linear(hidden_features,hidden_features) for _ in range(num_hidden_layers-1)])
+        self.output = nn.Linear(hidden_features,out_features)
+    def forward(self,x):
+        H = self.activation(self.H_0(x))
+        U = self.activation(self.U(x))
+        V = self.activation(self.V(x))
+        for hidden in self.H_layers:
+            Z = self.activation(hidden(H))
+            H = (1-Z)*U + Z*V
+
+        return self.output(H)
+        
+
+
 def Siren_Weight_init(layer:nn.Module):
     if isinstance(layer,nn.Linear):
         n = layer.in_features
         bound = torch.sqrt(6/n)
         torch.nn.init.uniform_(layer.weight,-bound,bound)
-        
 class Siren_Net(DE_Module):
     def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers,w0 :float = 30.,adaptive_activation = False):
         super().__init__()
