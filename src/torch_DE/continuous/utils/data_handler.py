@@ -19,7 +19,7 @@ class Data_handler(dict):
         return list(self.keys())
 
 
-    def set_to_device(self,device,to_show = True):
+    def set_to_device(self,device,to_show = False):
         if to_show:
             print(f'Set all tensors to device {device}')
         for group in self.keys():
