@@ -74,7 +74,7 @@ class Loss():
         Returns:
             The sum of all terms into a single element tensor. Use before calling backwards()
         '''
-        if self._sum is None or power != self._power:
+        if self._sum is None:
             self._sum = sum(self.individual_loss().values())
         return self._sum
 
@@ -100,10 +100,14 @@ class Loss_handler():
         losses = self.losses.individual_loss()
         if self.logger is None:
             self.logger = {loss_type : [] for loss_type in losses.keys()}
+            self.logger['total'] = []
         with torch.no_grad():
             for loss_type,loss in losses.items():
-                    self.logger[loss_type].append(float(loss.cpu()))
-            
+                self.logger[loss_type].append(float(loss.cpu()))
+
+            self.logger['total'].append(float(self.losses.sum().cpu()))
+
+
     def print_losses(self,epoch):
         print(f'Epoch {epoch} :--: ',end = '  ')
         for name,loss in self.losses.individual_loss().items():
@@ -171,6 +175,8 @@ class Loss_handler():
                     for (loss_name,loss_func),weight_func in zip(group.items(),weight_g.values()):
                         point_loss[loss_name] = loss_func(group_input,group_output)
                         weight[loss_name] = weight_func(group_input)
+                        
+                            
 
         return point_losses,weight_dict
     
@@ -198,10 +204,12 @@ class Loss_handler():
         
         custom_dic,weight_dict = self.group_checker('Custom',group)
         if not isinstance(weighting,dict):
-            weighting = {var_comp: weighting for var_comp in var_dict.keys()}
-        for weight,(func_name,(func,kwargs)) in zip(weighting,func_dict.items()):
+            weighting = {func_name: weighting for func_name in func_dict.keys()}
+
+        for weight,(func_name,func_items) in zip(weighting.values(),func_dict.items()):
+            (func,kwargs) = func_items if len(func_items) == 2 else func_items[0],{}
             custom_dic[group][func_name] = f(kwargs)
-            weight_dict[group][func_name] = weight
+            weight_dict[group][func_name] = self.make_weighting_func(weight,group)
 
 
     def set_terms(self,loss_type,loss_type_func,group,var_dict,weighting):
@@ -214,7 +222,7 @@ class Loss_handler():
 
         for weight,(var_comp,value_func) in zip(weighting.values(),var_dict.items()):
             loss_group[group][var_comp] = getattr(self,loss_type_func)(group,var_comp,value_func)
-            weight_group[group][var_comp] =  self.make_weighting_func(weight)
+            weight_group[group][var_comp] =  self.make_weighting_func(weight,group)
 
     
 
@@ -243,7 +251,7 @@ class Loss_handler():
 
         if isinstance(var,str):
             loss_group[group_1][f'{group_2}_{var}'] = self.periodic_loss_func(group_1,group_2,var)
-            weight_group[group_1][f'{group_2}_{var}'] =  self.make_weighting_func(weighting)
+            weight_group[group_1][f'{group_2}_{var}'] =  self.make_weighting_func(weighting,group_1)
         else:
             raise TypeError(f'varaible var needs to be type string Instead found type f{type(var)}')
 
@@ -267,11 +275,11 @@ class Loss_handler():
 
 
     @staticmethod
-    def make_weighting_func(weighting):
+    def make_weighting_func(weighting,group_name):
         if callable(weighting): 
-            return lambda x : weighting(x)
+            return lambda group_input : weighting(group_input[group_name])
         else:
-            return lambda x : weighting
+            return lambda group_input : weighting
         
 
     def periodic_loss_func(self,group_1,group_2,var):
@@ -284,11 +292,13 @@ class Loss_handler():
 
     def data_loss_func(self,group,var_comp:str,value_func):
         
+        value_func2 =  (lambda x : value_func) if not callable(value_func) else value_func
+        
         def data_loss_constructor(group_input,output_dict):
                 '''
                 u is a dictionary containing all the ouputs and derivatives of a
                 '''
-                return ((output_dict[group][var_comp] - value_func(group_input[group])))
+                return ((output_dict[group][var_comp] - value_func2(group_input[group])))
             
 
         return data_loss_constructor
