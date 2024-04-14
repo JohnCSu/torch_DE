@@ -18,3 +18,5 @@ def GradNorm(net:torch.nn.Module,global_weights:torch.Tensor,*losses:torch.Tenso
         
         #Just to be sure make everything a tensor (we dont call this often so it should be fine)
         return alpha*global_weights + (1-alpha)*new_weights
+
+

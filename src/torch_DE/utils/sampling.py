@@ -6,6 +6,13 @@ import torch
 from matplotlib import pyplot as plt
 from typing import Callable,Union,Dict,Iterable
 from torch_DE.continuous.utils.loss import Loss
+def sample_from_tensor(num_points: int,t:torch.Tensor,dim:int = 0):
+    '''
+    randomly samples `num_points` from the tensor `t`. Always indexes from the first (batch) dimension so samples a `(num_points,D,...)` from tensor `t` of size `(L,D,...)`
+    '''
+    return t[torch.randint(low =0,high = t.shape[dim],size = (num_points,))]
+
+
 class R3_sampler():
     def __init__(self,group:dict,sampler:Callable,device:str = 'cpu') -> None:
         '''
