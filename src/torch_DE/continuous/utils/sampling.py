@@ -28,29 +28,37 @@ class R3_sampler():
         self.device = device
         self._plot_args = None
 
-    def __call__(self,x:torch.tensor,res:Union[Iterable,Loss],**kwargs) -> torch.tensor:
+    def __call__(self,x:torch.tensor,res:Union[Iterable,Loss],loss_type = 'weighted',**kwargs) -> torch.tensor:
         '''
         Generate New points based on R3 Sampling
 
         inputs:
             x: torch.Tensor of data points used in current network evaluation shoud be of `shape (N,D)` with N being the batch dimension
-            res: Iterable | loss object. If iterable then we have a list/tuple of UNWEIGHTED residuals vectors to use as the F measure.
-                if loss object then torch_DE automatically extracts the unweighted residual vectors (calls loss.point_errors()). The L1 norm is applied first before summing all residual terms together.
-                if x and res are not `dict` or `Loss()` objects then the group initially defined in the sampler is ignored
+            
+            res: Iterable | loss object. If iterable then we have a list/tuple of residuals vectors to use as the F measure.
+                if loss object then torch_DE automatically extracts the residuals from group. The L1 norm is applied first before summing all residual terms together.
+                if x and res are not `dict` or `Loss()` objects then the group and loss_type defined in the sampler is ignored
+            
+            loss_type (string): Type of residual loss to use if Loss object is given, options available are 'weighted' or 'point error'
         returns:
             x_new: torch.Tensor of newly sampled points based on R3 algorithim. Same shape as x
         '''
-        return self.RRR_sample(x,res,**kwargs)
+        return self.RRR_sample(x,res,loss_type,**kwargs)
     
     @staticmethod
     def F_measure(*res,device = 'cpu'):
         return torch.sum(torch.stack([torch.abs(r) for r in res],dim = 0),dim=0).to(device)
 
-    def RRR_sample(self,x:Union[dict,torch.Tensor],res,**kwargs):
+    def RRR_sample(self,x:Union[dict,torch.Tensor],res:Union[list,Loss],loss_type = 'weighted',**kwargs):
 
         if isinstance(res,Loss):
-            res = list(res.point_error()['Residual'][self.group].values())
-
+            if loss_type == 'weighted':
+                res = list(res.weighted_error()['Residual'][self.group].values())
+            elif loss_type == 'point error':
+                res = list(res.point_error()['Residual'][self.group].values())
+            else:
+                raise ValueError(f'loss_type accepts only strings weighted and point error')
+            
         if isinstance(x,dict):
             x = x[self.group]
 
@@ -100,30 +108,3 @@ class R3_sampler():
                 plt.show()
             plt.clf()
             plt.cla()
-
-class Data_handler(dict):
-    def __init__(self):
-        super().__init__()
-        self.device = 'cpu'
-    def merge_groups(self):
-        '''
-        Create a concatenated vector in the group 'all'. Also creates the equivalent group names, and sizes to pass into DE_Getter()
-        '''
-        self.pop('all',None)
-        self.set_to_device(self.device,to_show=False)
-        group_names,group_sizes,group_data = zip(*[(name,data.shape[0],data) for name,data in self.items()])
-       
-        self['all'] = torch.cat(group_data)
-        return self['all'],group_names,group_sizes
-
-    def group_names(self):
-        return list(self.keys())
-
-
-    def set_to_device(self,device,to_show = True):
-        if to_show:
-            print(f'Set all tensors to device {device}')
-        for group in self.keys():
-            self[group] = self[group].to(device) 
-
-        self.device = device
