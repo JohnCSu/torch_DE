@@ -5,7 +5,7 @@ def get_activation_function(activation):
     if isinstance(activation,str):
         activation = getattr(torch,activation)
     return activation
-
+import math
 
 class DE_Module(nn.Module):
     '''
@@ -22,13 +22,33 @@ class DE_Module(nn.Module):
             return activation_function
 
 
-class adaptive_function(nn.Module):
-    def __init__(self,activation_function) -> None:
+class RWF_Linear(nn.Module):
+    def __init__(self, in_features: int, out_features: int, mean:float = 1,std_dev:float= 0.1,bias: bool = True,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
-        self.activation_function = activation_function
-        self.weight = nn.Parameter(data = torch.ones(1))
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = torch.empty((out_features, in_features), **factory_kwargs)
+        if bias:
+            self.bias = nn.Parameter(torch.empty(out_features, **factory_kwargs))
+        else:
+            self.register_parameter('bias', None)
+        self.glorot_init()
+
+        self.s = nn.Parameter( torch.exp(torch.normal(mean,std = torch.ones(out_features)*std_dev)).unsqueeze(dim = -1))
+        self.v = nn.Parameter(self.weight/self.s)
+
+    def glorot_init(self):
+        nn.init.xavier_normal_(self.weight)
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+            nn.init.uniform_(self.bias, -bound, bound)
+
     def forward(self,x):
-        return self.activation_function(self.weight*x)
+        return nn.functional.linear(x,self.v*self.s,self.bias)
+
 
 class MLP(nn.Module):
     '''
@@ -41,14 +61,18 @@ class MLP(nn.Module):
     activation: activation function of model. type string will use the correspong torch function or you can pass your own activation function.
 
     '''
-    def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers: int,activation = 'tanh') -> None:
+    def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers: int,activation = 'tanh',RWF = False) -> None:
         super().__init__()
-        self.linear_in = nn.Linear(in_features,hidden_features)
-        self.linear_out = nn.Linear(hidden_features,out_features)
-        
+
+        if RWF:
+            linear = RWF_Linear
+        else:
+            linear = nn.Linear        
+        self.linear_in = linear(in_features,hidden_features)
+        self.linear_out = linear(hidden_features,out_features)
         
         self.activation = get_activation_function(activation)
-        self.layers = nn.ModuleList([self.linear_in] + [nn.Linear(hidden_features, hidden_features) for _ in range(num_hidden_layers)  ])
+        self.layers = nn.ModuleList([self.linear_in] + [linear(hidden_features, hidden_features) for _ in range(num_hidden_layers)  ])
         
          
     def forward(self,x):
@@ -112,7 +136,7 @@ class Wang_Net(DE_Module):
         self.H_0 = nn.Linear(in_features,hidden_features)
         self.V = nn.Linear(in_features,hidden_features)
         self.activation = self.set_activation_function(activation,adaptive_activation)
-        self.H_layers = nn.ModuleList([nn.Linear(hidden_features,hidden_features) for _ in range(num_hidden_layers-1)])
+        self.H_layers = nn.ModuleList([nn.Linear(hidden_features,hidden_features) for _ in range(num_hidden_layers)])
         self.output = nn.Linear(hidden_features,out_features)
     def forward(self,x):
         H = self.activation(self.H_0(x))
