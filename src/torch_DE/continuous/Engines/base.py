@@ -1,5 +1,4 @@
 import torch
-from functorch import jacrev,jacfwd,vmap,make_functional
 from typing import Union,Dict,Iterable,Tuple,List
 from torch_DE.continuous.utils import Data_handler
 class engine():
@@ -53,7 +52,6 @@ class engine():
     def find_highest_order(self,derivatives):
         #Checking if variables in each derivative have been defined
         highest_order = 0
-        print(derivatives.keys())
         for deriv in derivatives.keys():
             if deriv.find('_') != -1:
                 _, indep_vars = deriv.split('_')

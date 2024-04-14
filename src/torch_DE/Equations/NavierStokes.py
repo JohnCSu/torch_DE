@@ -1,5 +1,7 @@
 from torch_DE.equations.Get_Derivatives import get_derivatives
-def get_NavierStokes(dims:int = 2,steady_state:bool = False,incompressible:bool = True,Re= None):
+from typing import Union,List,Tuple,Dict,Callable
+
+def get_NavierStokes(dims:int = 2,steady_state:bool = False,incompressible:bool = True,Re= None) -> Tuple[List[str],List[str],List[str],Dict[str,Callable]]:
     '''
     Returns the Reynold non-dimensional NavierStokes equations and other helpful things for dims upto 3
 
@@ -64,7 +66,7 @@ def get_NavierStokes(dims:int = 2,steady_state:bool = False,incompressible:bool 
     output_vars = vels[0:dims] + ('p',)
 
     derivatives = get_derivatives(input_vars,output_vars,*list(functions.values()),merge=True )
-    return tuple(input_vars),tuple(output_vars),derivatives,functions
+    return list(input_vars),list(output_vars),derivatives,functions
 
 
 if __name__ == '__main__':

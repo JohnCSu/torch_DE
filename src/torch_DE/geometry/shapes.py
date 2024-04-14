@@ -94,7 +94,7 @@ class Domain2D():
         #We use a brute force method for SDF. Points outside the domain are set to zero. This is good enough for PINN applications
         xmin,ymin,xmax,ymax = self.Domain.bounds
         x,y = [torch.linspace(xmin,xmax,resolution),torch.linspace(ymin,ymax,resolution)]
-        X,Y = torch.meshgrid(x,y)
+        X,Y = torch.meshgrid(x,y,indexing = 'ij')
         xg,yg = X.flatten(),Y.flatten()
 
         points = [Point(x1,y1) for x1,y1 in zip(xg,yg)]
