@@ -113,10 +113,16 @@ class Plotter():
         contained = domain.contains(ps)
         self.contour_points = xy[contained]
 
-    def validate_contour(self,net,input_vars,output_var,*,title=None,save_name = None,epoch = None,show = True,**kwargs):
+    def contour(self,net,input_vars,output_var,*,title=None,save_name = None,epoch = None,show = True,**kwargs):
+        '''
+        Plot Contour using points based on defined points from `Plotter().set_contour_points` if you want to change the input x use plot_2D
+        '''
         self.plot_2D('contour',self.contour_points,net,input_vars,output_var,title=title,save_name =save_name,epoch =epoch,show =show,domain = self.domain,**kwargs)
 
 
-    def validate_scatter(self,net,input_vars,output_var,*,title=None,save_name = None,epoch = None,show = True,**kwargs):
+    def scatter(self,net,input_vars,output_var,*,title=None,save_name = None,epoch = None,show = True,**kwargs):
+        '''
+        Plot Scatter using points based on defined points from `Plotter().set_contour_points` if you want to change the input x use plot_2D
+        '''
         self.plot_2D('scatter',self.contour_points,net,input_vars,output_var,title=title,save_name =save_name,epoch =epoch,show =show,domain = self.domain,**kwargs)
 
