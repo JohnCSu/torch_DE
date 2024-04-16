@@ -2,7 +2,7 @@ import torch
 from torch.func import jacrev,jacfwd,vmap
 from torch_DE.continuous.Engines import engine
 from typing import Union,Dict,List,Callable,Iterable
-from torch_DE.continuous.utils import Data_handler
+from torch_DE.utils import Data_handler
 class AD_engine(engine):
     def __init__(self,net,derivatives,**kwargs):
         super().__init__()

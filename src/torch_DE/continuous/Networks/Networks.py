@@ -61,7 +61,7 @@ class MLP(nn.Module):
     activation: activation function of model. type string will use the correspong torch function or you can pass your own activation function.
 
     '''
-    def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers: int,activation = 'tanh',RWF = False) -> None:
+    def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers: int,activation = 'tanh',RWF:bool = False) -> None:
         super().__init__()
 
         if RWF:

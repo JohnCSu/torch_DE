@@ -1,12 +1,15 @@
 import torch
 from typing  import Dict,Tuple,List,Union
 from matplotlib import pyplot as plt
-
+from pandas import DataFrame
+import pandas as pd
 class Validation_module():
     def __init__(self,input_vars,output_vars):
         self.input_vars :Union[List,Tuple]   = input_vars
         self.output_vars:Union[List,Tuple]  = output_vars
         self.data       :Dict[str,Tuple[torch.Tensor,torch.Tensor]] = {}
+        self.logger ={}
+
     def format(self,x,net,to_numpy = True):
         if isinstance(net,torch.nn.Module):
             device = net.parameters().__next__().device
@@ -87,4 +90,37 @@ class Validation_module():
         
         plt.close(fig)
 
+    def log(self,error_type,net,power = 1):
+        error_name = f'L{power}_{error_type}_Error'
+        if error_name not in self.logger.keys():
+            self.logger[error_name] = {}
+
+        error_dict = self.logger[error_name]
+
+        for output_var in self.data.keys():
+            if error_type == 'relative':
+                error_func = self.relative_error_norm
+                
+            elif error_type == 'absolute':
+                error_func = self.error_norm
+            else:
+                raise ValueError(f'error_type only accepts strings "relative" and "absolute"')
+
+            if output_var not in error_dict.keys():
+                error_dict[output_var] = []
+                
+            error_dict[output_var].append(float(error_func(net,output_var,power = power).cpu()))
+
+    def to_csv(self,save_dir,prefix='',output = False):
+        #Convert each to a Pandas DF
+        dfs = {}
+        for name,log in self.logger.items():
+            df = DataFrame(log)
+            file_name = f'{save_dir}/{prefix}{name}.csv'
+            df.to_csv(file_name,index=False)
+            dfs[name] = df
+        
+        if output:
+            return df
+        
 

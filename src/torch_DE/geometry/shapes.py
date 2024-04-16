@@ -6,7 +6,7 @@ from typing import Callable
 import matplotlib.pyplot as plt
 import torch
 from numpy.random import rand
-from torch_DE.continuous.utils import RegularGridInterpolator
+from torch_DE.utils import RegularGridInterpolator
 import geopandas as gdp
 
 def Circle(center:tuple,r:float,num_points = 1024):
@@ -65,19 +65,16 @@ class Domain2D():
 
         self.boundary_groups.update(
             {
-                f'exterior_edge_{i}':  LineString([p[i],p[i+1]]) for i in range(num_p-1)
+                f'exterior_edge_{i}':  (LineString([p[i],p[i+1]]),'linear')  for i in range(num_p-1) 
             }
 
         )
-
-
-
     def merge(self,*shapes,names = None):
         self.boolean_op(*shapes,names = names,op = 'add',inplace=True)
     def remove(self,*shapes,names= None):
         self.boolean_op(*shapes,names=names,op = 'sub',inplace=True)
 
-    def create_sdf(self,resolution: int = 256,device = 'cpu'):
+    def create_sdf(self,resolution: int = 256,scale_factor = 1.,device = 'cpu'):
         '''
         Creates a slightly modified SDF function for the current geometry. The SDF sets the values of points outside the geometry to zero tahter than be negative.
 
@@ -86,7 +83,8 @@ class Domain2D():
 
         
         Input:
-            Resolution: int (default = 256) Number of grid points in each X,Y direction to take
+            resolution: int (default = 256) Number of grid points in each X,Y direction to take
+            scale_factor: float or str. If `scale_factor == 'normalize'` then the sdf is scaled by the max(sdf) otherwise SDF is scaled by `scale_factor*SDF`. Default is 1
             device: str (default = 'cpu') Device to put the grid on. Default cpu but can be set to cuda
         Output:
             SDF func(xy) where xy is a tensor of shape (N,2). The output of this function is a tensor of size (N) of the signed distances of each point.
@@ -104,6 +102,7 @@ class Domain2D():
         
         distance = distance.reshape((resolution,resolution)).to(device = device)
 
+        distance = distance/distance.max() if scale_factor == 'normalize' or scale_factor == 'normalise' else distance*scale_factor
         self.sdf = RegularGridInterpolator((x,y),distance)
         self.sdf.set_device(device)
 
@@ -167,16 +166,41 @@ class Domain2D():
         if not inplace:
             return self
     
-    def add_boundary_group(self,shapeID,name = None):
+    def add_boundary_group(self,shapeID,line_type,name = None):
+        '''
+        Add boundary group to domain
+        
+        shapeID: str name of shape operation previously performed
+        line_type: str['curve','linear'] Chose curved when defining a boundary with curves. choose linear when the boundary contains only straight lines
+        '''
         if name is None:
             key = shapeID
         else:
             key = name
-        self.boundary_groups[key] = self.operations[shapeID].exterior
+        
+        assert line_type == 'curve' or line_type == 'linear', 'line_type can only be strings curve or linear'
 
+        self.boundary_groups[key] = (self.operations[shapeID].boundary,line_type)
+
+    
+    def generate_points_from_boundary(self,boundary,points_per_line = 100,random = False):
+            exterior,exterior_type = self.boundary_groups[boundary]
+            if exterior_type == 'curve':
+                return torch.tensor(exterior.coords)
+            elif exterior_type == 'linear':
+                num_lines = len(exterior.coords) - 1
+                return torch.tensor(self.generate_points_from_line(exterior,points_per_line*num_lines,random = random))
+
+
+    def generate_boundary_points(self,num_points = 100, random = False):
+        return   {name:self.generate_points_from_boundary(name,num_points,random) for name in self.boundary_groups.keys()} 
+
+    
     def clear_mesh(self):
         self.points,self.triangles = (None,None)
         print('mesh cleared')
+
+    
 
     def generate_points(self,n:int,shapeID:str = None,func:Callable = None,output_type:str = 'torch',seed:int = None,**kwargs):
         '''

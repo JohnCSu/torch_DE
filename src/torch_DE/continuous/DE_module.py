@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from .Engines import *
 from typing import Union
-from .utils import Data_handler
+from torch_DE.utils import Data_handler
 def aux_function(aux_func,is_aux = True) -> object:
     #aux_func has the output of (df,f) so we need it to output (df,(df,f))
     

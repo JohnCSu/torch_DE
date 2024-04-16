@@ -1,6 +1,6 @@
 import torch
 from typing import Union,Dict,Iterable,Tuple,List
-from torch_DE.continuous.utils import Data_handler
+from torch_DE.utils import Data_handler
 class engine():
     def __init__(self) -> None:
         self.derivatives = None

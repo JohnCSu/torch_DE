@@ -2,7 +2,7 @@
 
 
 def get_config_dict(turn_on_all = False):
-    config = {option:turn_on_all for option in ['Sampling','RWF','GradNorm','SDF']}
+    config = {option:turn_on_all for option in ['R3_Sampling','RWF','GradNorm','SDF',]}
     return config
 
 def config_run(*options,all_on = True):
@@ -26,33 +26,60 @@ def config_run(*options,all_on = True):
     return config
     
 
-def independent_runs():
+def independent_runs(*,exclude_options:list = None):
     '''
-    Create configs where we only turn one setting on at a time
+    Create configs where we only turn one setting on at a time as well as a config where all settings are turned off
+
+    Current Keys:
+        - 'R3_Sampling'
+        - 'RWF'
+        - 'GradNorm'
+        - 'SDF'
     '''
     config = get_config_dict(turn_on_all=False)
 
-    configs = [get_config_dict for _ in range(len(config.keys()))]
+    configs = [get_config_dict(False) for _ in range(len(config.keys()))]
 
-    for i,key in enumerate(config.keys()):
+    keys = tuple(config.keys())
+    for i in range(len(configs)):
+        key = keys[i]
         configs[i][key] = True
 
-    return {f'Only_{key}': config for config,key in zip(configs,configs.keys())}
+    if exclude_options is None:
+        exclude_options = []
+    elif isinstance(exclude_options,str):
+        exclude_options = [exclude_options]
+
+    configs_dict = {f'Only_{k}': c for c,k in zip(configs,keys) if k not in exclude_options}
+    configs_dict['All_Off'] = config
+    
+    return configs_dict
 
 
-def excluded_runs():
+def excluded_runs(*,exclude_options = None):
     '''
     Create configs where we have all settings turned on except for one setting
+
+    Current Keys:
+    - 'R3_Sampling'
+    - 'RWF'
+    - 'GradNorm'
+    - 'SDF'
+
     '''
     config = get_config_dict(turn_on_all=True)
 
-    configs = [get_config_dict for _ in range(len(config.keys()))]
+    configs = [get_config_dict(turn_on_all=True) for _ in range(len(config.keys()))]
 
-    for i,key in enumerate(config.keys()):
+    keys = tuple(config.keys())
+    for i in range(len(configs)):
+        key = keys[i]
         configs[i][key] = False
 
-    return {f'No_{key}': config for config,key in zip(configs,configs.keys())}
-
+    configs_dict = {f'Only_{k}': c for c,k in zip(configs,keys) if k not in exclude_options}
+    configs_dict['All_On'] = config
+    
+    return configs_dict
 
 
 

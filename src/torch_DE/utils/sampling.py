@@ -1,11 +1,12 @@
 import torch
 from matplotlib import pyplot as plt
 from typing import Callable,Union,Dict,Iterable
-from torch_DE.continuous.utils.loss import Loss
+from torch_DE.utils.loss import Loss
 import torch
 from matplotlib import pyplot as plt
 from typing import Callable,Union,Dict,Iterable
-from torch_DE.continuous.utils.loss import Loss
+
+
 def sample_from_tensor(num_points: int,t:torch.Tensor,dim:int = 0):
     '''
     randomly samples `num_points` from the tensor `t`. Always indexes from the first (batch) dimension so samples a `(num_points,D,...)` from tensor `t` of size `(L,D,...)`
@@ -91,15 +92,22 @@ class R3_sampler():
 
 
 
-    def plot(self,epoch,show = True,save_name = None,aspect_ratio = 'auto',**kwargs:dict):
+    def plot(self,epoch,show = True,save_name = None,aspect_ratio = 'auto',transpose_axis = False,**kwargs:dict):
             
             plt.clf()
             plt.cla()
             kwargs.setdefault('s',3)
             retained_points,new_points,F_measure = self._plot_args
-            plt.scatter(retained_points[:,0].cpu(),retained_points[:,1].cpu(),label = f'Retained Points N{torch.sum(F_measure >= F_measure.mean())}',**kwargs )
-            
-            plt.scatter(new_points[:,0].cpu(),new_points[:,1].cpu(),c = 'r',label = f'{torch.sum(F_measure < F_measure.mean())} New Points After Resampling',**kwargs)
+
+            if transpose_axis:
+                yr,xr = retained_points[:,0].cpu(),retained_points[:,1].cpu()
+                yn,xn = new_points[:,0].cpu(),new_points[:,1].cpu()
+            else:
+                xr,yr = retained_points[:,0].cpu(),retained_points[:,1].cpu()
+                xn,yn = new_points[:,0].cpu(),new_points[:,1].cpu()
+                
+            plt.scatter(xr,yr,c= 'b', label = f'Retained Points N{torch.sum(F_measure >= F_measure.mean())}',**kwargs )
+            plt.scatter(xn,yn,c = 'r',label = f'{torch.sum(F_measure < F_measure.mean())} New Points After Resampling',**kwargs)
             plt.title(f'Sample vs ReSample at Iteration {epoch} For F Mean Criteria: {F_measure.mean():.3E}')
             plt.gca().set_aspect(aspect_ratio)
             plt.legend(loc='lower center', bbox_to_anchor=(0.5, -0.25))

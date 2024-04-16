@@ -264,7 +264,7 @@ class Loss_handler():
             if loss_type not in self.loss_groups.keys():
                 self.loss_groups[loss_type] = {}
                 self.weighting[loss_type] = {}
-            assert group in self.groups, "The group {group} does not exist in the loss handler. Please check your spelling"
+            assert group in self.groups, f"The group {group} does not exist in the loss handler. Please check your spelling"
             loss_group = self.loss_groups[loss_type]
             weight_dict = self.weighting[loss_type]
             if group not in loss_group.keys():

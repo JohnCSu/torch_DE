@@ -46,7 +46,7 @@ class RegularGridInterpolator:
         Input
             xy a tensor of size (N,D). It assumes that the first 2 D dimensions represent x and y respectively
         '''
-        return self.interpolate([xy[:,0].contiguous(),xy[:,1].contiguous()])
+        return self.interpolate([xy[:,0],xy[:,1]])
     def interpolate(self,points_to_interp):
         with torch.no_grad():
             assert self.points is not None
