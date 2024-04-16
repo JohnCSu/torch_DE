@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from typing import Union,Dict,Callable,Tuple
 
 class Loss():
-    def __init__(self,point_error,weighting,power):
+    def __init__(self,error_and_weights,power):
         '''
         Stores the losses from the loss handler. To access values use the following methods:
 
@@ -13,9 +13,8 @@ class Loss():
         - 'individual_loss()'   : Dict of the form `(str,Tensor)` Returns the loss of each different loss type terms e.g. Residual, Boundary, Initial conditions
         - 'sum'                 : Tensor with 1 elem. Returns a single scalar value representing the objective function
         '''
-        
-        self._point_error = point_error
-        self.weighting = weighting
+        self.error_and_weights = error_and_weights 
+        self._point_error = None
 
         self._weighted_error = None
         self._MSE = None
@@ -30,11 +29,13 @@ class Loss():
             Dict of Dict of Dict where `(str,(str,(str,Tensor))))`. Each Tensor is the results of a specific function applied to a group output \n 
             e.g `loss['boundary']['noslip']['u']` contains the point error between the netowrk output u and the actual boundary value
         '''
+        if self._point_error is None:
+            self._point_error = {loss_type: {group_name : {term_name: point_error for term_name,(point_error,_) in group.items() } for (group_name,group) in (loss_group.items()) } for (loss_type,loss_group) in self.error_and_weights.items() }
         return self._point_error
 
     def weighted_error(self)-> Dict[str,Dict[str,Dict[str,torch.Tensor]]]:
         if self._weighted_error is None:
-            self._weighted_error = {loss_type: {group_name : {term_name: point_error*weight for (term_name,point_error),weight in zip(group.items(),weight_group.values()) } for (group_name,group),weight_group in zip(loss_group.items(),weight_type.values()) } for (loss_type,loss_group),weight_type in zip(self._point_error.items(),self.weighting.values()) }
+            self._weighted_error = {loss_type: {group_name : {term_name: point_error*weight for term_name,(point_error,weight) in group.items() } for (group_name,group) in (loss_group.items()) } for (loss_type,loss_group) in self.error_and_weights.items() }
         return self._weighted_error
     
     def MSE(self) -> Dict[str,Dict[str,Dict[str,torch.Tensor]]]:
@@ -87,7 +88,6 @@ class Loss_handler():
         Loss_handler is designed to work with PINN_dataholder and DE_Getter()
 
         '''
-        self.weighting = {}
         self.power = 2
         self.groups = set(groups)
         self.loss_groups = {}
@@ -141,8 +141,8 @@ class Loss_handler():
                 - `sum()`           : Tensor with 1 elem. Returns a single scalar value representing the objective function
         '''
 
-        point_losses,weighting = self.calculate_point_error(group_input,group_output)
-        self.losses = Loss(point_losses,weighting,power)
+        errors_and_weights = self.calculate_point_error_and_weights(group_input,group_output)
+        self.losses = Loss(errors_and_weights,power)
 
         if output_type is None:
             return self.losses
@@ -150,35 +150,22 @@ class Loss_handler():
             return getattr(self.losses,output_type)()
 
 
-    def calculate_point_error(self,group_input:Dict,group_output:Dict) -> Tuple[Dict[str,Dict[str,Dict[str,torch.Tensor]]],Dict[str,Dict[str,Dict[str,torch.Tensor]]]]:
+    def calculate_point_error_and_weights(self,group_input:Dict,group_output:Dict) -> Tuple[Dict[str,Dict[str,Dict[str,torch.Tensor]]],Dict[str,Dict[str,Dict[str,torch.Tensor]]]]:
         '''
         Create a nested Dict[str,Dict[str,Dict[str,Tensor]]] of both the point error and weights of each points.
 
         Returns a tuple pair of Dict[str,Dict[str,Dict[str,Tensor]]] with the first element being the point errors and second element/dict being the point weights for each term
         '''
         point_losses = {}
-        weight_dict = {}
-
-         
-        for (loss_type,loss_group),weight_group in zip(self.loss_groups.items(),self.weighting.values()):
+        for (loss_type,loss_group) in self.loss_groups.items():
                 point_losses[loss_type] = {}
-                weight_dict[loss_type] = {} 
-
-                for (group_name,group),weight_g in zip(loss_group.items(),weight_group.values()):
+                for (group_name,group) in loss_group.items():
                     point_losses[loss_type][group_name] = {}
-                    weight_dict[loss_type][group_name] = {}
-
-                    weight = weight_dict[loss_type][group_name]
                     point_loss = point_losses[loss_type][group_name]
-                    
-                
-                    for (loss_name,loss_func),weight_func in zip(group.items(),weight_g.values()):
-                        point_loss[loss_name] = loss_func(group_input,group_output)
-                        weight[loss_name] = weight_func(group_input)
-                        
-                            
-
-        return point_losses,weight_dict
+                    for loss_name,(loss_func,weight_func) in group.items():
+                        point_loss[loss_name] = (loss_func(group_input,group_output),weight_func(group_input))
+                         
+        return point_losses
     
 
     def add_custom_function(self,group,func_dict,weighting = 1):
@@ -202,27 +189,22 @@ class Loss_handler():
                 return func(x,g,**kwargs)
             return inner_f
         
-        custom_dic,weight_dict = self.group_checker('Custom',group)
+        custom_dic = self.group_checker('Custom',group)
         if not isinstance(weighting,dict):
             weighting = {func_name: weighting for func_name in func_dict.keys()}
 
         for weight,(func_name,func_items) in zip(weighting.values(),func_dict.items()):
-            (func,kwargs) = func_items if len(func_items) == 2 else func_items[0],{}
-            custom_dic[group][func_name] = f(kwargs)
-            weight_dict[group][func_name] = self.make_weighting_func(weight,group)
+            (func,kwargs) = func_items if len(func_items) == 2 else (func_items[0],{})
+            custom_dic[group][func_name] = (f(kwargs),self.make_weighting_func(weight,group))
 
 
     def set_terms(self,loss_type,loss_type_func,group,var_dict,weighting):
         
-        loss_group,weight_group = self.group_checker(loss_type,group)
-
+        loss_group = self.group_checker(loss_type,group)
         if not isinstance(weighting,dict):
             weighting = {var_comp: weighting for var_comp in var_dict.keys()}
-
-
         for weight,(var_comp,value_func) in zip(weighting.values(),var_dict.items()):
-            loss_group[group][var_comp] = getattr(self,loss_type_func)(group,var_comp,value_func)
-            weight_group[group][var_comp] =  self.make_weighting_func(weight,group)
+            loss_group[group][var_comp] = (getattr(self,loss_type_func)(group,var_comp,value_func),self.make_weighting_func(weight,group))  
 
     
 
@@ -243,15 +225,12 @@ class Loss_handler():
 
         The key structure is [group_1][group_2_var]
         '''
-        loss_group,weight_group = self.group_checker('Periodic',group_1)
+        loss_group = self.group_checker('Periodic',group_1)
         assert group_2 in self.groups, "The group {group} does not exist in the loss handler. Please check your spelling"
-        
-        if group_1 not in self.weighting.keys():
-            self.weighting[group_1] = {}
 
         if isinstance(var,str):
-            loss_group[group_1][f'{group_2}_{var}'] = self.periodic_loss_func(group_1,group_2,var)
-            weight_group[group_1][f'{group_2}_{var}'] =  self.make_weighting_func(weighting,group_1)
+            loss_group[group_1][f'{group_2}_{var}'] = (self.periodic_loss_func(group_1,group_2,var),self.make_weighting_func(weighting,group_1))
+            
         else:
             raise TypeError(f'varaible var needs to be type string Instead found type f{type(var)}')
 
@@ -263,14 +242,12 @@ class Loss_handler():
             '''
             if loss_type not in self.loss_groups.keys():
                 self.loss_groups[loss_type] = {}
-                self.weighting[loss_type] = {}
-            assert group in self.groups, f"The group {group} does not exist in the loss handler. Please check your spelling"
+            if loss_type != 'Custom':
+                assert group in self.groups, f"The group {group} does not exist in the loss handler. Please check your spelling"
             loss_group = self.loss_groups[loss_type]
-            weight_dict = self.weighting[loss_type]
             if group not in loss_group.keys():
                 loss_group[group] = {}
-                weight_dict[group] = {}
-            return loss_group,weight_dict
+            return loss_group
 
 
 

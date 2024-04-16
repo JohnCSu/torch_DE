@@ -37,6 +37,8 @@ def Rectangle(coords: list,create_from = 'corners'):
     return Polygon(coords)
 
 
+
+
 class Domain2D():
     '''
     Domain Object to create shapes from. Because of how Polygon classes work in shapely, subclassing is weird. It seems better to treat shapely objects 
@@ -55,10 +57,16 @@ class Domain2D():
         self.boundary_groups = {}
         self.create_domain_exterior_edges()
         self.sdf = None
+
+        self.partitions = Partition_Group()
     def __getitem__(self,key):
         #Returns the coords of a part of the domain
         return self.operations[key]
     
+
+    def partition_2points(self,p1,p2,name):
+        self.partitions.partition_2Points(self,p1,p2,name)
+
     def create_domain_exterior_edges(self):
         p = self.boundary.coords
         num_p = len(p)
@@ -256,14 +264,22 @@ class Domain2D():
         return Domain2D.generate_points_from_line(line,num_points,random)
 
 
-    def plot(self,exterior= False,boundary_groups = False, **kwargs):
-        self.plotter = gdp.GeoSeries(self.Domain)
+    def plot(self,exterior= False,partitions = True,aspect_ratio = 'equal', **kwargs):
+        plotter = gdp.GeoSeries(self.Domain)
+        p_groups = gdp.GeoSeries([v[0] for v in self.partitions.values()])
+        fig, ax = plt.subplots()
         
         if exterior:
-            self.plotter.boundary.plot(**kwargs)
+            plotter.boundary.plot(ax=ax,**kwargs)
+            if partitions:
+                p_groups.plot(ax=ax)
         else:
-            self.plotter.plot(**kwargs)
+            plotter.plot(ax=ax,**kwargs)
 
+        ax.set_aspect(aspect_ratio)
+
+        plt.show()
+        plt.close(fig) 
 
 def is_tri_in_shape(points,triangles,shape):
     for triangle in triangles:
@@ -316,3 +332,32 @@ def triangulate_shape(shape,show_plot = False):
         plt.show()
 
     return points,triangles        
+
+
+
+
+class Partition_Group(dict):
+    def __init__(self):
+        super().__init__()
+    def partition_2Points(self,domain:Domain2D,p1,p2,name):
+        line = LineString((p1,p2))
+        self[name] = (domain.Domain.intersection(line),'linear')
+
+    def partition_from_lines(self,domain,lines,name):
+        self[name] = (domain.Domain.intersection(lines),'linear')
+
+    def partition_from_curve(self,domain,line,name):
+        self[name] = (domain.Domain.intersection(line),'curve')
+
+
+    def _gen_points(self,partition_name,points_per_line,random = False):
+        line,line_type = self[partition_name]
+        if line_type == 'curve':
+            return torch.tensor(line.coords)
+        elif line_type == 'linear':
+            # num_lines = len(line.coords) - 1
+            return torch.tensor(Domain2D.generate_points_from_line(line,points_per_line,random = random))
+
+
+    def generate_points(self,num_points=100,random = False):
+        return {k: self._gen_points(k,num_points,random) for k in self.keys()}

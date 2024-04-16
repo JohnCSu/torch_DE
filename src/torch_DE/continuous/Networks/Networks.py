@@ -50,7 +50,53 @@ class RWF_Linear(nn.Module):
         return nn.functional.linear(x,self.v*self.s,self.bias)
 
 
-class MLP(nn.Module):
+class Fourier_Embedding(nn.Module):
+    def __init__(self, in_features: int, out_features: int,std_dev:float= 3.,bias: bool = True,device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = nn.Parameter(torch.empty((out_features, in_features), **factory_kwargs))
+        if bias:
+            self.bias = nn.Parameter(torch.empty(out_features, **factory_kwargs))
+        else:
+            self.register_parameter('bias', None)
+        self.glorot_init(std_dev)
+
+    def glorot_init(self,std):
+        nn.init.normal_(self.weight,0,std)
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+            nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self,x):
+        x = nn.functional.linear(x,self.weight,self.bias)
+        return torch.cat([torch.sin(x),torch.cos(x)],dim = -1)
+
+
+
+
+class Fourier_Net(DE_Module):
+    def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers: int,activation = 'tanh',RWF:bool = False,fourier_std = 3) -> None:
+        super().__init__()
+        if RWF:
+            linear = RWF_Linear
+        else:
+            linear = nn.Linear        
+        self.linear_in = Fourier_Embedding(in_features,hidden_features//2,std_dev=fourier_std,bias= False)
+        self.linear_out = linear(hidden_features,out_features)
+        
+        self.activation = get_activation_function(activation)
+        self.layers = nn.ModuleList([self.linear_in] + [linear(hidden_features, hidden_features) for _ in range(num_hidden_layers)  ])
+    
+    def forward(self,x):
+        for layer in self.layers:
+            x = self.activation(layer(x))
+        return self.linear_out(x)
+
+
+class MLP(DE_Module):
     '''
     Simple Multi Layer Perceptron Network. Good as a baseline.
 
@@ -81,20 +127,19 @@ class MLP(nn.Module):
     
         return self.linear_out(x)
 
-class Fourier_Net(DE_Module):
-    def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers: int,num_freq,activation = 'tanh',adaptive_activation = False) -> None:
-        super().__init__()
-        self.f = nn.Linear(in_features,num_freq)
-        self.linear_out = nn.Linear(hidden_features,out_features)
-        self.activation = self.set_activation_function(activation,adaptive_activation)
+# class Fourier_Net(DE_Module):
+#     def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers: int,num_freq,activation = 'tanh',adaptive_activation = False) -> None:
+#         super().__init__()
+#         self.f = nn.Linear(in_features,num_freq)
+#         self.linear_out = nn.Linear(hidden_features,out_features)
+#         self.activation = self.set_activation_function(activation,adaptive_activation)
 
-        self.layers = nn.ModuleList([nn.Linear(num_freq*2,hidden_features)] + [nn.Linear(hidden_features, hidden_features) for _ in range(num_hidden_layers-1)])
-    def forward(self,x):
-        encode = torch.cat([torch.sin(2*torch.pi*self.f(x)),torch.cos(2*torch.pi*self.f(x))],dim = -1)
-        for layer in self.layers:
-            encode = self.activation(layer(encode))
-        return self.linear_out(encode)
-
+#         self.layers = nn.ModuleList([nn.Linear(num_freq*2,hidden_features)] + [nn.Linear(hidden_features, hidden_features) for _ in range(num_hidden_layers-1)])
+#     def forward(self,x):
+#         encode = torch.cat([torch.sin(2*torch.pi*self.f(x)),torch.cos(2*torch.pi*self.f(x))],dim = -1)
+#         for layer in self.layers:
+#             encode = self.activation(layer(encode))
+#         return self.linear_out(encode)
 
 class Modified_Fourier_Net(DE_Module):
     '''
