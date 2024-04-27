@@ -44,10 +44,12 @@ class Domain2D():
     Domain Object to create shapes from. Because of how Polygon classes work in shapely, subclassing is weird. It seems better to treat shapely objects 
     functionally than OOB as it is immutable
     '''
-    def __init__(self,base :Polygon ) -> None:
+    def __init__(self,base :Polygon,is_rectangle = False ) -> None:
         self.operations ={'base_op_1':base}
         self.num_operations = 1 
         self.Domain = base
+
+        self.is_rectangle = is_rectangle
         self.bounds = self.Domain.bounds
         self.boundary = self.Domain.boundary
         self.contains = self.Domain.contains
@@ -57,7 +59,7 @@ class Domain2D():
         self.boundary_groups = {}
         self.create_domain_exterior_edges()
         self.sdf = None
-
+        
         self.partitions = Partition_Group()
     def __getitem__(self,key):
         #Returns the coords of a part of the domain
@@ -70,13 +72,20 @@ class Domain2D():
     def create_domain_exterior_edges(self):
         p = self.boundary.coords
         num_p = len(p)
-
-        self.boundary_groups.update(
+        if self.is_rectangle:
+            wall_names = ['left wall','top wall','right wall','bot wall']
+            self.boundary_groups.update(
             {
-                f'exterior_edge_{i}':  (LineString([p[i],p[i+1]]),'linear')  for i in range(num_p-1) 
+                wall_name:  (LineString([p[i],p[i+1]]),'linear')  for i,wall_name in enumerate(wall_names) 
             }
-
         )
+        else:
+            self.boundary_groups.update(
+                {
+                    f'exterior_edge_{i}':  (LineString([p[i],p[i+1]]),'linear')  for i in range(num_p-1) 
+                }
+
+            )
     def merge(self,*shapes,names = None):
         self.boolean_op(*shapes,names = names,op = 'add',inplace=True)
     def remove(self,*shapes,names= None):
@@ -197,7 +206,7 @@ class Domain2D():
                 return torch.tensor(exterior.coords)
             elif exterior_type == 'linear':
                 num_lines = len(exterior.coords) - 1
-                return torch.tensor(self.generate_points_from_line(exterior,points_per_line*num_lines,random = random))
+                return self.generate_points_from_line(exterior,points_per_line*num_lines,random = random)
 
 
     def generate_boundary_points(self,num_points = 100, random = False):
@@ -356,7 +365,7 @@ class Partition_Group(dict):
             return torch.tensor(line.coords)
         elif line_type == 'linear':
             # num_lines = len(line.coords) - 1
-            return torch.tensor(Domain2D.generate_points_from_line(line,points_per_line,random = random))
+            return Domain2D.generate_points_from_line(line,points_per_line,random = random)
 
 
     def generate_points(self,num_points=100,random = False):
