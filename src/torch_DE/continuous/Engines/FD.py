@@ -2,7 +2,7 @@ from typing import Dict,Callable,Iterable,Union,List
 from torch_DE.continuous.Engines import engine
 import torch
 class FD_engine(engine):
-    def __init__(self,net:torch.nn.Module,derivatives:Dict,dxs:Iterable,sdf:Callable = None,target_group = None) -> None:
+    def __init__(self,net:torch.nn.Module,derivatives:Dict,dxs:Iterable,sdf:Callable = None,target_groups = None) -> None:
         super().__init__()
         self.dims = len(dxs)
         if sdf is None:
@@ -11,14 +11,10 @@ class FD_engine(engine):
             self.sdf = sdf
         
         self.net = net
-        self.derivatives = derivatives.copy()
+        self.derivatives = derivatives
         self.output_vars = self.get_output_vars(self.derivatives) 
 
-        #Delete the keys that are the output variables
-        for output_var in self.output_vars.keys():
-            self.derivatives.pop(output_var)
-        
-        self.target_group = target_group
+        self.target_groups = target_groups
         self.initial_step(*dxs)
  
     def initial_step(self,*dxs) -> None:
@@ -47,7 +43,7 @@ class FD_engine(engine):
         return self.get_derivs(u,u_adj,dxs)
     
 
-    def calculate(self,x:Union[torch.Tensor,dict],target_group:str = None,**kwargs) -> Dict[str,Dict[str,torch.Tensor]]:
+    def calculate(self,x:Union[torch.Tensor,dict],target_groups:str = None,**kwargs) -> Dict[str,Dict[str,torch.Tensor]]:
         '''
         Calculate derivatives using Finite differences
 
@@ -58,38 +54,58 @@ class FD_engine(engine):
         Returns
             Output_dict: Dict
         '''
-        self.target_group = target_group
+        self.target_groups = target_groups
 
+        if target_groups is not None:
+            target_groups = [target_groups] if isinstance(target_groups,str) else target_groups
         if isinstance(x,dict):
-            output = self.net_pass_from_dict(x)
-            x_fd = x[target_group]
-            output[target_group].update(self.finite_diff(x_fd))
+            output = self.net_pass_from_dict(x,exclude=target_groups)
+            x_fd,groups,group_sizes = self.cat_groups({target_group:x[target_group] for target_group in target_groups})
+            derivs = self.finite_diff(x_fd)
+            output_derivs = self.group_output(derivs,groups,group_sizes)
+            output.update(output_derivs)
             return output
         elif isinstance(x,torch.Tensor):
-            return {target_group if target_group is not None else 'all': self.finite_diff(x)}
+            return {target_groups if target_groups is not None else 'all': self.finite_diff(x)}
 
 
     def get_derivs(self,u:torch.Tensor,u_adj:List[torch.Tensor],dxs:List[torch.Tensor]) -> Dict[str,torch.Tensor]:
-        group_dict = {}
+        d_dict = {}
         for deriv_val,idx in self.derivatives.items():
-            #i gives the output var index, j the index of input var
-            i = idx[0]
-            j = idx[1]
-            #Assume for now no mixed derivatives (yikes need to fix)
-            
-            u2 = u[:,i]
-            u1,u3 = u_adj[j][0][:,i],u_adj[j][1][:,i]
-            dx = dxs[j]
-
-            order = len(idx)-1
-            if order == 1:
-                group_dict[deriv_val] = self.first_derivative(u1,u2,u3,dx)
-            elif order == 2:
-                group_dict[deriv_val] = self.second_derivative(u1,u2,u3,dx)
+            if deriv_val in self.output_vars:
+                # Primary variables
+                d_dict[deriv_val] = u[:,self.output_vars[deriv_val]]
             else:
-                raise ValueError(f'Only upto second order non mixed derivatives are currently supported')
+                #i gives the output var index, j the index of input var
+                i = idx[0]
+                j = idx[1]
+                #Assume for now no mixed derivatives (yikes need to fix)
+                
+                u2 = u[:,i]
+                u1,u3 = u_adj[j][0][:,i],u_adj[j][1][:,i]
+                dx = dxs[j]
+
+                order = len(idx)-1
+                if order == 1:
+                    d_dict[deriv_val] = self.first_derivative(u1,u2,u3,dx)
+                elif order == 2:
+                    d_dict[deriv_val] = self.second_derivative(u1,u2,u3,dx)
+                else:
+                    raise ValueError(f'Only upto second order non mixed derivatives are currently supported')
+        return d_dict
         
+    def group_output(self,deriv_dict,groups,group_sizes):
+        group_dict ={}
+        idx_start = 0
+        for group,group_size in zip(groups,group_sizes):
+            idx_end = idx_start + group_size
+            group_dict[group] = {deriv_name:deriv[idx_start:idx_end] for deriv_name,deriv in deriv_dict.items() }
+            idx_start = idx_end
+            
         return group_dict
+
+
+
     @staticmethod
     def generate_stencil(x,dxs,sdf):
         

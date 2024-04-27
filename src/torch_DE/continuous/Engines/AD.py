@@ -63,7 +63,7 @@ class AD_engine(engine):
                 x,groups,group_sizes = self.cat_groups(x)
                 output_dict = self.group_output(self.autodiff(x),groups,group_sizes)
         elif isinstance(x,torch.Tensor):
-            output_dict = self.group_output(self.autodiff(x),target_group= target_group)
+            output_dict = self.group_output(self.autodiff(x))
 
         return output_dict
         
