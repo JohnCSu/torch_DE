@@ -75,6 +75,30 @@ class Fourier_Embedding(nn.Module):
         return torch.cat([torch.sin(x),torch.cos(x)],dim = -1)
 
 
+class Periodic_embedding(nn.Module):
+    def __init__(self,args) -> None:
+        super().__init__() 
+
+
+        self.params = nn.ModuleList()
+        self.funcs = []
+
+        for param,state in args:
+            if param is None:
+                p = nn.Identity()
+                self.funcs.append(p)
+                self.params.append(p)
+            elif state == 'train':
+                p = nn.Parameter(torch.tensor([param]))
+                self.params.append(param)
+                self.funcs.append(lambda x :torch.stack([torch.sin(2*torch.pi/p * x),torch.cos(2*torch.pi/p * x)]))
+            elif state == 'fixed':
+                self.funcs.append(lambda x :torch.stack([torch.sin(2*torch.pi/param * x),torch.cos(2*torch.pi/param * x)])) 
+        
+        
+    def forward(self,x):
+        return torch.cat([encode(x) for encode in self.funcs])
+        
 
 
 class Fourier_Net(DE_Module):
@@ -175,14 +199,26 @@ class Wang_Net(DE_Module):
     '''
     A variation of the network proposed by Wang et al: https://arxiv.org/abs/2001.04536 
     '''
-    def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers: int,activation = 'tanh',adaptive_activation = False) -> None:
+    def __init__(self,in_features : int,out_features: int,hidden_features: int,num_hidden_layers: int,activation = 'tanh',adaptive_activation = False,RWF = True,fourier_embedding = True) -> None:
         super().__init__()
-        self.U = nn.Linear(in_features,hidden_features)
-        self.H_0 = nn.Linear(in_features,hidden_features)
-        self.V = nn.Linear(in_features,hidden_features)
+        if RWF:
+            linear = RWF_Linear
+        else:
+            linear = nn.Linear
+
+        if fourier_embedding:       
+            self.U = Fourier_Embedding(in_features,hidden_features//2) 
+            self.H_0 = Fourier_Embedding(in_features,hidden_features//2)
+            self.V = Fourier_Embedding(in_features,hidden_features//2)
+        else:        
+            self.U = linear(in_features,hidden_features)
+            self.H_0 = linear(in_features,hidden_features)
+            self.V = linear(in_features,hidden_features)
+        
+        
         self.activation = self.set_activation_function(activation,adaptive_activation)
-        self.H_layers = nn.ModuleList([nn.Linear(hidden_features,hidden_features) for _ in range(num_hidden_layers)])
-        self.output = nn.Linear(hidden_features,out_features)
+        self.H_layers = nn.ModuleList([linear(hidden_features,hidden_features) for _ in range(num_hidden_layers)])
+        self.output = linear(hidden_features,out_features)
     def forward(self,x):
         H = self.activation(self.H_0(x))
         U = self.activation(self.U(x))
