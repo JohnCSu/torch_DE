@@ -7,15 +7,33 @@ from matplotlib import pyplot as plt
 from typing import Callable,Union,Dict,Iterable
 
 
-def sample_from_tensor(num_points: int,t:torch.Tensor,dim:int = 0):
+
+def add_time_col(tensor,col = -1):
+    return torch.cat([tensor,torch.zeros((tensor.shape[0],1),device=tensor.device)],dim = col)
+
+def add_time_point(tensor,t_point,axis = -1):
+    tensor[:,axis] = t_point*torch.ones((tensor.shape[0]),device=tensor.device)
+
+
+def add_random_time_point(tensor,interval,col = -1):
+    a,b = interval 
+    tensor[:,col] = torch.ones((tensor.shape[0]),device=tensor.device)*(torch.rand(1,device=tensor.device)*(b-a)+a)
+
+def add_random_time(tensor,interval,col = -1):
+    a,b = interval
+    tensor[:,col] = torch.rand((tensor.shape[0]),device=tensor.device)*((b-a)+ a)
+
+
+def sample_from_tensor(num_points: int,t:torch.Tensor,causal = False,time_col:int = -1):
     '''
     randomly samples `num_points` from the tensor `t`. Always indexes from the first (batch) dimension so samples a `(num_points,D,...)` from tensor `t` of size `(L,D,...)`
     '''
-    return t[torch.randint(low =0,high = t.shape[dim],size = (num_points,))]
+    tensor =t[torch.randint(low =0,high = t.shape[0],size = (num_points,))]
+    return tensor if not causal else tensor[tensor[:,time_col].sort()[-1]]
 
 
 class R3_sampler():
-    def __init__(self,group:dict,sampler:Callable,device:str = 'cpu') -> None:
+    def __init__(self,sampler:Callable,*,group:dict = None,device:str = 'cpu',causal = False,time_interval = None) -> None:
         '''
         Sampler Based on the Retain, Resample and Release Algorithim by __ et al
 
@@ -25,12 +43,25 @@ class R3_sampler():
         device: The device to put the new sample of collocation point to. Default is cuda
         funcs: The resiudal functions to call
         
+        causal flag. Set true if causality weighting is to be used. This is independent of the causal gate. See time_interval for causal gate
+        time_interval: Tuple representing the start and end points of the time interval. Set for activating causal gate mechnaism
         '''
         self.group = group
         self.sampler = sampler
         self.device = device
         self._plot_args = None
 
+        self.time_interval = time_interval
+        self.g = lambda t,g: t
+        self.alpha =5
+        self.gamma = -0.5
+        self.nu = 1e-3
+        self.eps = 20
+        self.dmax = 0.1
+        self.causal = causal
+        if self.time_interval is not None:
+            T = self.time_interval[-1]
+            self.g = lambda t,g : (1-torch.tanh(self.alpha*(t/T-g)))/2
     def __call__(self,x:torch.tensor,res:Union[Iterable,Loss],loss_type = 'weighted',**kwargs) -> torch.tensor:
         '''
         Generate New points based on R3 Sampling
@@ -66,7 +97,8 @@ class R3_sampler():
             x = x[self.group]
 
         with torch.no_grad():
-            F_measure = self.F_measure(*res,device = self.device)
+            causal_gate = self.g(x[:,-1],self.gamma)
+            F_measure = self.F_measure(*res,device = self.device)*causal_gate
             x = x.to(self.device)
             # print(F_measure.shape)
             mean = F_measure.mean()
@@ -79,9 +111,14 @@ class R3_sampler():
 
             #Plotting (Optional):
             self._plot_args = [x_retain,x_new,F_measure]
-            
+            #Causal Gate for Gamma
+            if self.time_interval is not None: 
+                L = mean
+                self.gamma = self.gamma + self.nu*min(torch.exp(-self.eps*L),self.dmax)
+
             # Release (Returns the resampled collocation points and )
-            return torch.cat([x_retain.to(self.device),x_new.to(self.device)],dim = 0)
+            Release = torch.cat([x_retain.to(self.device),x_new.to(self.device)],dim = 0)
+            return Release if self.causal is False else Release[Release[:,-1].sort()[1]]
 
     def retain(self,x,Res,mean):
         #We only want the points that are greater than the mean
