@@ -3,12 +3,19 @@ from typing  import Dict,Tuple,List,Union
 from matplotlib import pyplot as plt
 from pandas import DataFrame
 import pandas as pd
+from torch_DE.post import plotter
 class Validation_module():
-    def __init__(self,input_vars,output_vars):
+    '''
+    Object for tracking Model Accuracy against real_life data/ground truth. In other Deep Learning tasks this is equivalent to evaluating the model against test data
+    
+    In other words, validation is concerned with tracking test metrics such as relative L2 error against real data
+    '''
+    def __init__(self,input_vars,output_vars,domain = None):
         self.input_vars :Union[List,Tuple]   = input_vars
         self.output_vars:Union[List,Tuple]  = output_vars
         self.data       :Dict[str,Tuple[torch.Tensor,torch.Tensor]] = {}
         self.logger ={}
+        self.domain = domain
 
     def format(self,x,net,to_numpy = True):
         if isinstance(net,torch.nn.Module):
