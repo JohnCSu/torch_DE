@@ -10,7 +10,7 @@ from torch_DE.utils import RegularGridInterpolator
 import geopandas as gdp
 
 def Circle(center:tuple,r:float,num_points = 1024):
-    return Point(center).buffer(r,num_points)
+    return Point(center).buffer(r,resolution = num_points//4)
 
 def Rectangle(coords: list,create_from = 'corners'):
     '''

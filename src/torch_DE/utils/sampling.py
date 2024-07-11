@@ -5,23 +5,7 @@ from torch_DE.utils.loss import Loss
 import torch
 from matplotlib import pyplot as plt
 from typing import Callable,Union,Dict,Iterable
-
-
-
-def add_time_col(tensor,col = -1):
-    return torch.cat([tensor,torch.zeros((tensor.shape[0],1),device=tensor.device)],dim = col)
-
-def add_time_point(tensor,t_point,axis = -1):
-    tensor[:,axis] = t_point*torch.ones((tensor.shape[0]),device=tensor.device)
-
-
-def add_random_time_point(tensor,interval,col = -1):
-    a,b = interval 
-    tensor[:,col] = torch.ones((tensor.shape[0]),device=tensor.device)*(torch.rand(1,device=tensor.device)*(b-a)+a)
-
-def add_random_time(tensor,interval,col = -1):
-    a,b = interval
-    tensor[:,col] = torch.rand((tensor.shape[0]),device=tensor.device)*((b-a)+ a)
+import warnings
 
 
 def sample_from_tensor(num_points: int,t:torch.Tensor,causal = False,time_col:int = -1):

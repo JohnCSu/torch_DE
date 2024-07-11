@@ -4,6 +4,7 @@ from matplotlib import pyplot as plt
 from pandas import DataFrame
 import pandas as pd
 from torch_DE.post import plotter
+from torch import Tensor
 class Validation_module():
     '''
     Object for tracking Model Accuracy against real_life data/ground truth. In other Deep Learning tasks this is equivalent to evaluating the model against test data
@@ -13,7 +14,7 @@ class Validation_module():
     def __init__(self,input_vars,output_vars,domain = None):
         self.input_vars :Union[List,Tuple]   = input_vars
         self.output_vars:Union[List,Tuple]  = output_vars
-        self.data       :Dict[str,Tuple[torch.Tensor,torch.Tensor]] = {}
+        self.data       :Dict[str,Tuple[Tensor,Tensor]] = {}
         self.logger ={}
         self.domain = domain
 
@@ -36,19 +37,19 @@ class Validation_module():
         output_dict = {output_var:out[:,i] for i,output_var in enumerate(self.output_vars)}
 
         return input_dict,output_dict
-    def add_data(self,x_ref:torch.Tensor,y_ref:torch.Tensor,output_var):
+    def add_data(self,x_ref:Tensor,y_ref:Tensor,output_var):
         self.data[output_var] = (x_ref,y_ref)
     
 
-    def error(self,net,output_var) -> torch.Tensor:
+    def error(self,net,output_var) -> Tensor:
         x,y = self.data[output_var]
         _,output_dict = self.format(x,net,to_numpy=False)
         return output_dict[output_var] - y
 
-    def error_norm(self,net,output_var,power = 1)-> torch.Tensor:
+    def error_norm(self,net,output_var,power = 1)-> Tensor:
         return (self.error(net,output_var)).norm(power)
     
-    def relative_error_norm(self,net,output_var,power = 1)-> torch.Tensor:
+    def relative_error_norm(self,net,output_var,power = 1)-> Tensor:
         _,y = self.data[output_var]
         error_norm = self.error_norm(net,output_var,power)
         return error_norm/y.norm(power)

@@ -1,9 +1,9 @@
 import torch
 from collections.abc import Iterable
-from typing import Union,Dict,Callable,Tuple
+from typing import Union,Dict,Callable,Tuple,List
 
 from torch_DE.utils.loss_weighting import GradNorm,Causal_weighting
-
+from torch_DE.utils.data import PINN_dict,PINN_dataset
 class Loss():
     def __init__(self,error_and_weights,power,causal,eps = 1):
         '''
@@ -54,9 +54,11 @@ class Loss():
         '''
         if self._weighted_error is None:
             self._weighted_error = {loss_type: {group_name : {term_name: weight*(point_error.pow(self._power)) for term_name,(point_error,weight) in group.items() } for (group_name,group) in (loss_group.items()) } for (loss_type,loss_group) in self.error_and_weights.items() }
+            
+            
             if self.causal:
                 self.causal_weighting = Causal_weighting(self._weighted_error,eps = self.eps)
-                self._weighted_error['Residual'] = {group_name:{term_name: self.causal_weighting*term_loss for term_name,term_loss in group.items()} for group_name,group in self._weighted_error['Residual'].items()}
+                self._weighted_error['residual'] = {group_name:{term_name: self.causal_weighting*term_loss for term_name,term_loss in group.items()} for group_name,group in self._weighted_error['residual'].items()}
 
         if flatten:
             return self.flatten(self._weighted_error,order = 2)
@@ -136,30 +138,47 @@ class Loss():
             print(f'Epoch {epoch} :--: Total Loss {float(self.sum()): .3E}  ',end = '  ')
             for name,loss in self.individual_loss().items():
                 print( f'{name} Loss: {float(loss): .3E}',end = '  ')
+            if self.causal_weighting is not None:
+                print(f'Causal Weighting Stats: Max: {float(self.causal_weighting.max()):.3E}, Mean: {float(self.causal_weighting.mean()):.3E}, Min: {float(self.causal_weighting.min()):.3E}',end = '   ')
             print()
     
 class Loss_handler():
-    def __init__(self,groups:Iterable) -> None:
+    def __init__(self,groups:PINN_dataset) -> None:
         '''
         Loss_handler is designed to work with PINN_dataholder and DE_Getter()
 
         '''
         self.power = 2
-        self.groups = set(groups)
+        if not isinstance(groups,(dict,PINN_dataset)):
+            raise TypeError('groups must be either type dict or PINN_dataset')
+        
+        if isinstance(groups,PINN_dataset):
+            groups = groups.groups
+        
+            
+        self.groups = groups
+        self.group_names = groups.keys()
         self.loss_groups = {}
         self.losses = None
         self.logger = None
-    def __call__(self,group_input:Dict,group_output:Dict,power:int = 2,output_type:str = 'sum'):
-        return self.calculate(group_input,group_output,power,output_type)
+    def __call__(self,group_input:Dict,group_output:Dict,**kwargs):
+        return self.calculate(group_input,group_output,**kwargs)
 
 
     def num_losses(self):
+        '''
+        Calculate number of losses
+        '''
         n = 0
         for loss_type in self.loss_groups.values():
             for group in loss_type.values():
                 n+= len(group.values())   
         
         return n
+    
+    def __len__(self):
+        return self.num_losses()
+
     def log_loss(self):
         losses = self.losses.individual_loss()
         if self.logger is None:
@@ -178,7 +197,7 @@ class Loss_handler():
             print( f'{name} Loss: {float(loss): .3E}',end = '  ')
         print()
 
-    def calculate(self,group_input:Dict,group_output:Dict,power:int = 2,causal = False,eps = 1.)->Loss:
+    def calculate(self,group_input:Dict,group_output:Dict,loss_type_first = False,power:int = 2,causal = False,eps = 1.)->Loss:
         '''
         Calculate losses. In Loss Handler we store terms in a 3-nested dictionary so accessing indiviudual terms is loss_type -> group__name -> var_name -> Output
         Inputs:
@@ -198,7 +217,7 @@ class Loss_handler():
                 - `sum()`           : Tensor with 1 elem. Returns a single scalar value representing the objective function
         '''
 
-        errors_and_weights = self.calculate_point_error_and_weights(group_input,group_output)
+        errors_and_weights = self.calculate_point_error_and_weights(group_input,group_output,loss_type_first)
         self.losses = Loss(errors_and_weights,power,causal=causal,eps = eps)
 
         
@@ -206,13 +225,15 @@ class Loss_handler():
        
 
 
-    def calculate_point_error_and_weights(self,group_input:Dict,group_output:Dict) -> Tuple[Dict[str,Dict[str,Dict[str,torch.Tensor]]],Dict[str,Dict[str,Dict[str,torch.Tensor]]]]:
+    def calculate_point_error_and_weights(self,group_input:Dict,group_output:Dict,loss_group_first = True) -> Tuple[Dict[str,Dict[str,Dict[str,torch.Tensor]]],Dict[str,Dict[str,Dict[str,torch.Tensor]]]]:
         '''
         Create a nested Dict[str,Dict[str,Dict[str,Tensor]]] of both the point error and weights of each points.
 
         Returns a tuple pair of Dict[str,Dict[str,Dict[str,Tensor]]] with the first element being the point errors and second element/dict being the point weights for each term
         '''
         point_losses = {}
+
+        
         for (loss_type,loss_group) in self.loss_groups.items():
                 point_losses[loss_type] = {}
                 for (group_name,group) in loss_group.items():
@@ -220,7 +241,7 @@ class Loss_handler():
                     point_loss = point_losses[loss_type][group_name]
                     for loss_name,(loss_func,weight_func) in group.items():
                         point_loss[loss_name] = (loss_func(group_input,group_output),weight_func(group_input))
-                         
+        
         return point_losses
     
 
@@ -245,7 +266,7 @@ class Loss_handler():
                 return func(x,g,**kwargs)
             return inner_f
         
-        custom_dic = self.group_checker('Custom',group)
+        custom_dic = self.group_checker('custom',group)
         if not isinstance(weighting,dict):
             weighting = {func_name: weighting for func_name in func_dict.keys()}
 
@@ -255,7 +276,6 @@ class Loss_handler():
 
 
     def set_terms(self,loss_type,loss_type_func,group,var_dict,weighting):
-        
         loss_group = self.group_checker(loss_type,group)
         if not isinstance(weighting,dict):
             weighting = {var_comp: weighting for var_comp in var_dict.keys()}
@@ -266,14 +286,33 @@ class Loss_handler():
 
     def add_boundary(self,group,bound_dict,weighting:Union[float,Callable,Dict] = 1):
         
-        self.set_terms('Boundary','data_loss_func',group,bound_dict,weighting)
+        self.set_terms('boundary','data_loss_func',group,bound_dict,weighting)
+    
+    def add_data_constraint(self,group:str,data_keys:List[str] = None,weighting = 1):
+        '''
+        Add a data driven contstraint to a PINN. This is used when we have data is strictly tied to the input data i.e. data from a sensor over time. 
+        '''
+        # self.set_terms('data_driven','data_driven',group,data_keys,weighting)
+
+        if self.groups[group].targets is None:
+            raise ValueError(f'The group {group} does not have any target data attributed to it')
+
+        if data_keys is None:
+            data_keys = self.groups[group].targets.keys()
+
+        loss_group = self.group_checker('data driven',group)
+        if not isinstance(weighting,dict):
+            weighting = {var_comp: weighting for var_comp in data_keys}
         
 
+        for key,weight in zip(data_keys,weighting.values()):
+            loss_group[group][key] = (self.data_driven_func(group,key), self.make_weighting_func(weight,group))
+    
     def add_residual(self,group,res_dict:dict,weighting = 1):
-        self.set_terms('Residual','residual_loss_func',group,res_dict,weighting)
+        self.set_terms('residual','residual_loss_func',group,res_dict,weighting)
     
     def add_initial_condition(self,group:str,ic_dict:dict,weighting = 1):
-        self.set_terms('Initial Condition','data_loss_func',group,ic_dict,weighting)
+        self.set_terms('initial condition','data_loss_func',group,ic_dict,weighting)
         
     def add_periodic(self,group_1:str,group_2:str,var:str,weighting = 1):
         '''
@@ -281,7 +320,7 @@ class Loss_handler():
 
         The key structure is [group_1][group_2_var]
         '''
-        loss_group = self.group_checker('Periodic',group_1)
+        loss_group = self.group_checker('periodic',group_1)
         assert group_2 in self.groups, "The group {group} does not exist in the loss handler. Please check your spelling"
 
         if isinstance(var,str):
@@ -298,8 +337,8 @@ class Loss_handler():
             '''
             if loss_type not in self.loss_groups.keys():
                 self.loss_groups[loss_type] = {}
-            if loss_type != 'Custom':
-                assert group in self.groups, f"The group {group} does not exist in the loss handler. Please check your spelling"
+            if loss_type != 'custom':
+                assert group in self.group_names, f"The group {group} does not exist in the loss handler. Please check your spelling"
             loss_group = self.loss_groups[loss_type]
             if group not in loss_group.keys():
                 loss_group[group] = {}
@@ -310,7 +349,7 @@ class Loss_handler():
     @staticmethod
     def make_weighting_func(weighting,group_name):
         if callable(weighting): 
-            return lambda group_input : weighting(group_input[group_name])
+            return lambda group_input : weighting(group_input[group_name].inputs)
         else:
             return lambda group_input : weighting
         
@@ -323,7 +362,10 @@ class Loss_handler():
         return periodic_loss
 
 
-    def data_loss_func(self,group,var_comp:str,value_func):
+    def data_driven_func(self,group,data_var):
+        return lambda group_input,output_dict: (output_dict[group][data_var] - group_input[group].targets[data_var]) 
+
+    def data_loss_func(self,group:str,var_comp:str,value_func):
         
         value_func2 =  (lambda x : value_func) if not callable(value_func) else value_func
         
@@ -331,7 +373,7 @@ class Loss_handler():
                 '''
                 u is a dictionary containing all the ouputs and derivatives of a
                 '''
-                return ((output_dict[group][var_comp] - value_func2(group_input[group])))
+                return ((output_dict[group][var_comp] - value_func2(group_input[group].inputs)))
             
 
         return data_loss_constructor

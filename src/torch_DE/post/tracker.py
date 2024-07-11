@@ -30,9 +30,9 @@ class Tracker(dict):
             merge_df.fillna(fillna)
         return merge_df
 
-    def to_csv(self,filename,*,fillna = None):
+    def to_csv(self,filename,*,fillna = None,**to_csv_kwargs):
         df = self.to_DataFrame(fillna)
-        df.to_csv(filename)
+        df.to_csv(filename,index=False,**to_csv_kwargs)
 
     def plot(self,key:str,*,show = True,save_name = None,output = False,y_scale = 'linear',x_scale = 'linear',**plot_kwargs):
         df = DataFrame(self[key],columns = ['epoch',key])
@@ -62,6 +62,20 @@ class Tracker(dict):
         plt.close(fig)
         if output:
             return (x,y),('epoch',key)
+
+
+    @staticmethod
+    def stringify(epoch,*,format_code = '.3e',**kwargs):
+        s = f'Epoch: {epoch} '
+
+        for key,value in kwargs.items():
+            s2 = f'{key}: {float(value):{format_code}} '
+            s = s+s2
+
+        return s
+
+
+
 
 
 

@@ -3,6 +3,7 @@ __pycache__
 *lightning_logs*
 build/*
 dist/*
-Tutorial/*.png
-Tutorial/*.jpg
-Tutorial/*.gif
+Tutorials/*.png
+Tutorials/*.jpg
+Tutorials/*.gif
+Tutorials/*.ipynb

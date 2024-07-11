@@ -1,6 +1,6 @@
 import torch
 from typing import Union,Dict,Iterable,Tuple,List
-from torch_DE.utils import Data_handler
+from torch_DE.utils.data import PINN_dict
 class engine():
     def __init__(self) -> None:
         self.derivatives = None
@@ -9,7 +9,7 @@ class engine():
     def __call__(self,*args,**kwargs):
         return self.calculate(*args,**kwargs)
 
-    def cat_groups(self,x: Union[torch.tensor,dict,Data_handler],exclude:str = None) -> Tuple[torch.Tensor,Union[None,List[str]],Union[None,List[int]]]:
+    def cat_groups(self,x: Union[torch.Tensor,PINN_dict],exclude:str = None) -> Tuple[torch.Tensor,Union[None,List[str]],Union[None,List[int]]]:
         '''
         merges all the different tensors into one big concatenated tensor along batch dimension (assumes that first dimenstion is batch dimension)
         also creates a list of group names and sizes.
@@ -17,11 +17,11 @@ class engine():
         if exclude is a str then that group is excluded (use if that excluded group is to be Differentiated)
         
         '''
-        if isinstance(x,dict):
+        if isinstance(x,PINN_dict):
             exclude = [exclude] if isinstance(exclude,(str)) or exclude is None else exclude
-            group_names,group_data,group_sizes = zip(*[(group,data,data.shape[0]) for group,data in x.items() if group not in exclude])
+            group_names,group_data,group_sizes = zip(*[(group.name,group.inputs,group.inputs.shape[0]) for group in x.values() if group.name not in exclude])
             return torch.cat(group_data),group_names,group_sizes
-        elif isinstance(x,torch.tensor):
+        elif isinstance(x,torch.Tensor):
             return x,None,None
         else:
             raise ValueError(f'input should be of type dict or torch.tensor. Got instead {type(x)}')

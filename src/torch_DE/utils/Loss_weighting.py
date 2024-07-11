@@ -2,7 +2,7 @@ import torch
 
 def GradNorm(net:torch.nn.Module,global_weights:torch.Tensor,*losses:torch.Tensor,alpha:float = 0.9,max_weight = None,eps = 1e-5):
     '''
-    Gradient Normalisation Method by __ et al
+    Gradient Normalisation Method by __ et al. Returns weights for each loss essentially by nomalising each loss's gradient so they are all roughlt the same size
     '''
     assert isinstance(global_weights,torch.Tensor),f'global_weights needs to be of type Torch.Tensor!!! Got {type(global_weights)} type instead'
     assert len(global_weights) == len(losses) , f'the number of weights {len(global_weights)} given do not match the number of losses ({len(losses)})'
@@ -32,7 +32,7 @@ def Causal_weighting(loss,eps=1.0):
     Returns: Causal weights for given residual loss
     '''
     with torch.no_grad():
-        res_loss = [ l for group in loss['Residual'].values() for l in group.values() ]
+        res_loss = [ l for group in loss['residual'].values() for l in group.values() ]
         res_loss = sum(res_loss)/len(res_loss)
         res_cumsum = torch.cumsum(res_loss,dim = 0)
         causal_weights = torch.exp(-eps*res_cumsum)

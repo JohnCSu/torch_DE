@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from .Engines import *
 from typing import Union
-from torch_DE.utils import Data_handler
+from torch_DE.utils.data import PINN_dict
 def aux_function(aux_func,is_aux = True) -> object:
     #aux_func has the output of (df,f) so we need it to output (df,(df,f))
     
@@ -126,6 +126,8 @@ class DE_Getter():
         if isinstance(deriv_method,str):
             if deriv_method  == 'AD':
                 self.deriv_method = AD_engine(self.net,self.derivatives)
+            elif deriv_method  == 'FD':
+                self.deriv_method = FD_engine(self.net,self.derivatives,dxs = [1e-3 for _ in range(len(self.input_vars))])
         elif isinstance(deriv_method,engine):
             self.deriv_method = deriv_method
         else:
@@ -134,19 +136,19 @@ class DE_Getter():
 
 
 
-    def calculate(self,x : Union[torch.tensor,dict,Data_handler], **kwargs) -> dict:
+    def calculate(self,x : Union[torch.Tensor,dict,PINN_dict], **kwargs) -> dict:
         '''
         Extract the desired differentials from the neural network using ADE and functorch. The Engine 
 
         Args:
-        x Union[torch.tensor,dict,Data_handler].
+        x Union[torch.tensor,dict,PINN_dict].
             - torch.tensor:  
-            - dict | Data_handler. If the data is stored with a dict like object such as Data_handler (has dict methods keys(), values() and items()) then groups and group_sizes can be left blank
+            - dict | PINN_dict. If the data is stored with a dict like object such as PINN_dict (has dict methods keys(), values() and items()) then groups and group_sizes can be left blank
 
         **kwargs: keyword arguments depending on the method to extract derivatives
 
         Autodiff (AD) and  Finite Difference (FD) Engine are built into Torch DE and have the following additional kwargs:
-            - target group: str. The group to be differentiated. if not all points will be differentiated.\n 
+            - target groups: str. The group to be differentiated. if not all points will be differentiated.\n 
                 This is optional for AD engine but required for FD engine if a dictionary like data input is given.
 
         

@@ -2,16 +2,19 @@
 
 Torch_DE is a framework for solving differential equations (DE) using Physics Infomed Neural Networks (PINNs)! 
 
-Torch_DE's approach is to be highly modular between different components while still remaining close to standard pytorch syntax allowing easy modification to the runnning code. While PINN frameworks like Modulus and DeepXDE are very powerful,it can be difficult to understand the backend and make changes to the training loop.
-
-The advantage of sticking to pytorch syntax is users can freely choose what parts about torch DE are useful and more easily combine them into their workflow. For example, because torch DE sticks to pytroch syntax, incorporating workflows such as tensorboard or WanDb is significantly easier. You can also reduce boilerplate via Pytorch Lightning!
-
 <img src="imgs/u_and_v.gif"/>
 
-# Aim
-Torch DE is currently focused on the creation of PINNs on 2D spatial geometries (with optional time dimension). 2D geometries is the focus as it can easily be visualised on a notebook or pyplot, while also having geometric complexity that 1D problems lack.  
+# Why?
+## Barrier to Entry
+Existing PINN frameworks like Nvidia Modulus and DeepXDE are very powerful, but it can be difficult to understand the underneath and make changes to the training loop. Torch_DE is designed for researchers and beginners to get into developing and playing around with PINNs quickly.
+## From the ground up approach
+Torch_DE's approach is to be highly modular between different components while still remaining close to standard pytorch syntax and workflow as much as possible. Torch_DE tries to minimise the abstraction, working from the ground up rather than top down. 
 
-Currently implementing the features found in [JaxPI](https://github.com/PredictiveIntelligenceLab/jaxpi)! Check them out!
+The advantage of this is users can more easily implement there own custom solutions and also combine them into their workflow. For example, because torch DE sticks to pytroch syntax, incorporating workflows such as tensorboard or WanDb is significantly easier. You can also reduce boilerplate via Pytorch Lightning!
+
+## Notebook and Report friendly
+Torch DE is currently focused on the creation of PINNs on 2D spatial geometries (with optional time dimension). 2D geometries is the focus as it can easily be visualised on a notebook or pyplot, while also having geometric complexity that 1D problems lack (such as holes and sharp corners).  
+
 
 # TLDR Features
 - Easy Derivative and residual calculation
@@ -37,6 +40,41 @@ python3 -m pip install -e .
 A packaged version will be available in the future once I get things up to standard!
 
 # Components
+Torch DE follows a very similar workflow to standard Pytorch:
+
+```python
+import torch
+from torch_DE import ...
+# Define variables and derivatives needed:
+input_vars = ['x','t']
+output_vars =['u']
+derivatives = ['u_x','u_xx','u_xy']
+
+# Define Points, Dataset and Dataloader
+points = torch.linspace(0,1,10_000)
+dataset = PINN_dataset()
+dataset.add_group('col_points',points,batch_size = 2000)
+DL = PINN_Dataloader(dataset)
+
+#Define Loss function:
+losses = ...
+
+# Define Network PINN and optimizer
+net = MLP
+PINN = DE_getter(net = MLP,derivatives = derivatives)
+optimiser = torch.optim.Adam(net)
+optimiser.zero_grad()
+
+for x in DL:
+    x = x.to('cuda')
+    output = PINN(x)
+    loss = losses(output).sum()
+    loss.backwards()
+    optimiser.step()
+    optimiser.zero_grad()
+```
+
+
 ## Geometry
 torch DE geometry is allows you to create simple 2D domains for training PINNs. We pick 2D as it can easily be displayed in a notebook compared to 3D (and 1D is just a line!):
 

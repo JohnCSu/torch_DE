@@ -1,12 +1,136 @@
 from matplotlib import pyplot as plt
+from torch import Tensor
 import torch
 from typing import Union,Iterable
 from shapely import points,box
 import geopandas as gpd
-from torch_DE.utils.sampling import add_time_point,add_time_col
+from torch_DE.utils.time import add_time
 from numpy.typing import ArrayLike
 
+
 class Plotter():
+    def __init__(self,input_vars:Union[list,tuple],output_vars:Union[list,tuple]) -> None:
+        self.input_vars = input_vars
+        self.output_vars = output_vars
+        self.contour_points = None
+        self.domain =None
+        self.time_point = None
+        self.has_time = False
+        self.is_time = False
+        self.fig = None
+        self.ax = None
+
+        self.input_dict = {input_var:i for i,input_var in enumerate(input_vars)}
+        self.output_dict = {output_var:i for i,output_var in enumerate(output_vars)}
+
+    def contour_points_from_domain(self,domain,resolution = 100,time =False,time_dim = -1):
+        self.domain = domain
+        bounds = domain.bounds
+        x_range = (bounds[0],bounds[2])
+        y_range = (bounds[1],bounds[3])
+
+        x,y =  [ grid.flatten() for grid in torch.meshgrid([torch.linspace(*x_range,resolution),torch.linspace(*y_range,resolution)])]
+        
+        xy = torch.stack([x,y],dim = -1)
+        #Check if in geometry and retain point in geometry:
+        ps = points(xy.numpy())
+        contained = domain.contains(ps)
+        self.contour_points = xy[contained]
+
+        if time:
+            # Add time col and set to time = 0
+            self.contour_points = add_time('single point',self.contour_points,point = 0.,dim = time_dim)
+            self.has_time = True
+            self.time_dim = time_dim
+    
+
+    def set_time_point(self,t:float):
+        assert self.has_time, 'the attribute has_time must be set to True before calling set_time_point'
+        'Add a time point to the data'
+        self.contour_points[:,self.time_dim] = t
+
+    def get_xyz(self,net,x_in,input_vars,output_var):
+        with torch.no_grad():
+            out = net(x_in)
+        
+        x,y = [x_in[:,self.input_dict[input_var]] for input_var in input_vars]
+        z = out[:,self.output_dict[output_var]]
+        return x,y,z
+
+    def contour(self,net,input_vars,output_var,title,**kwargs):
+        assert len(input_vars) == 2, 'input vars must be of length 2'
+        
+        x,y,z = self.get_xyz(net,self.contour_points,input_vars,output_var)
+        
+        self.plot_2D('contour',x,y,z,input_vars,title,**kwargs)
+    
+
+    def plot_2D(self,plot_type,x,y,z,input_vars,title,**kwargs):
+        '''
+        Plot a contour or scatter plot of a 2D Field
+
+        inputs:
+            - plot_type: str of either `'contour'` or `'scatter'` to choose the type of plot from
+            - x: tensor/array-like representing the coordinates for z data along the x-axis should be a vector of size (N,)
+            - y: tensor/array-like representing the coordinates for z data along the y-axis should be a vector of size (N,)
+            - z: tensor/array-like for the output of the data
+            - input_vars: list|tuple pair of str determinig the x and y axis respectively. each str must be contained in `self.input_vars`. If None the default labels for each axis is 'x' and 'y' respectively.
+            - output_var: str name of z_label to plot. If None the default name for the z data is 'u'
+            - output: bool (default `False`) output plotting data as a pair of tuples with the first being the plotting data and the 2nd tuple as the respective labels e.g `(x,y,z),(x_label,y_label,z_label)`.
+                 Data is return as numpy arrays. useful if you want more control in your plotting
+            - save_name: str | None : filename to save figure. if None the plot is not saved
+            - show: bool (default: `True`) boolean on whether to show plot or not
+            - aspect_ratio: str option to determine aspect ratio of axes options inlcude 'equal','auto' see `ax.set_aspect` for more details
+
+        To set additional keywords for the plotting command (such as tricontourf or `plt.scatter`), use the `add_colorbar_kwargs` method. For colorbar modification, use the add_colorbar_kwargs `add_colorbar_kwargs` method
+
+        Output:
+            If output is set to True then return a pair of tuples with the first being the plotting data and the 2nd tuple as the respective labels e.g `(x,y,z),(x_label,y_label,z_label)`.
+        '''
+        
+        kwargs.setdefault('levels',100)
+        kwargs.setdefault('cmap','jet')
+
+        self.fig,self.ax = plt.subplots()
+        if plot_type == 'contour':
+            self.contour_plot = self.ax.tricontourf(x,y,z,**kwargs)
+        
+        self.add_domain_to_plot(self.domain,self.ax)
+        self.ax.set_xlabel(input_vars[0])
+        self.ax.set_ylabel(input_vars[-1])
+        self.ax.set_title(title)
+        self.fig.colorbar(self.contour_plot)
+
+        
+    
+    def show(self):
+        self.fig.show()
+        plt.show()
+        plt.close(self.fig)
+
+    def savefig(self,figname,*args,**kwargs):
+        self.fig.savefig(figname,*args,**kwargs)
+
+    @staticmethod
+    def add_domain_to_plot(domain,ax):
+        if domain is not None:
+            inv_shape = domain.Domain.symmetric_difference(box(*domain.Domain.bounds))
+            if inv_shape.is_empty is not True:
+                p = gpd.GeoSeries(domain.Domain.symmetric_difference(box(*domain.Domain.bounds)))
+                p.plot(ax = ax,color = 'white')
+
+
+
+
+
+
+
+
+
+
+
+
+class Plotter2():
     def __init__(self,input_vars:Union[list,tuple],output_vars:Union[list,tuple]) -> None:
         self.input_vars = input_vars
         self.output_vars = output_vars
@@ -24,23 +148,23 @@ class Plotter():
 
         self.colorbar_kwargs = {}
 
-    def format(self,x,net):
+    def format(self,x:torch.Tensor,net:torch.nn.Module,to_numpy = True):
         if isinstance(net,torch.nn.Module):
             device = net.parameters().__next__().device
         else:
             device = 'cpu'
 
         with torch.no_grad():
-            out = net(x.to(device))       
-            out = out.cpu().numpy()
-            x = x.cpu().numpy()
+            out:torch.Tensor = net(x.to(device))       
+            out = out.cpu().numpy() if to_numpy else out.cpu()
+            x = x.cpu().numpy() if to_numpy else x.cpu()
         
         input_dict = {input_var:x[:,i] for i,input_var in enumerate(self.input_vars)}
         output_dict = {output_var:out[:,i] for i,output_var in enumerate(self.output_vars)}
 
         return input_dict,output_dict
     
-    def plot(self,x:torch.Tensor,net:torch.nn.Module,input_var,output_var,*,save_dir = None,epoch = None,show = True,**kwargs):
+    def plot(self,x:Tensor,net:torch.nn.Module,input_var,output_var,*,save_dir = None,epoch = None,show = True,**kwargs):
         input_dict,output_dict = self.format(x,net)
         title = f'{output_var} vs {input_var} {f"at epoch {epoch}" if epoch is not None else ""}'
         plt.plot(input_dict[input_var],output_dict[output_var],**kwargs)
@@ -130,10 +254,12 @@ class Plotter():
         ax.set_xlabel(input_vars[0]), ax.set_ylabel(input_vars[1])
 
         fig.colorbar(plotting_mappable,**self.colorbar_kwargs)
-        if save_name is not None:
-            fig.savefig(save_name)
         if show:
             fig.show()
+        
+        if save_name is not None:
+            fig.savefig(save_name)
+        
             
         
         plt.close(fig)
@@ -159,7 +285,7 @@ class Plotter():
         if time_interval is not None:
             self.is_time = True
             self.time_interval = time_interval
-            self.contour_points = add_time_col(self.contour_points,col = time_col)
+            self.contour_points = add_time_col(self.contour_points,dim = time_col)
             self.time = 0
     def set_time_point(self,t):
         if self.is_time is False:
