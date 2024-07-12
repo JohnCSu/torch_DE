@@ -107,7 +107,7 @@ class DE_Getter():
                 self.derivatives[deriv] = index
 
 
-    def set_deriv_method(self,deriv_method):
+    def set_deriv_method(self,deriv_method,**kwargs):
         '''
         Set how to generate the derivatives for the PINN. Note that derivatives to extract must be supplied before calling the derivative method
         
@@ -121,13 +121,16 @@ class DE_Getter():
             
         kwargs: any keywords to initialize the engine. net and derivatives are automatically passed in
         '''
+
+        kwargs.setdefault('dxs',[1e-3 for _ in range(len(self.input_vars))])
+        
         if not isinstance(self.derivatives,dict):
             raise ValueError(f'The derivatives to extract has not been set properly instead a type of {type(self.derivatives)} was found')
         if isinstance(deriv_method,str):
             if deriv_method  == 'AD':
-                self.deriv_method = AD_engine(self.net,self.derivatives)
+                self.deriv_method = AD_engine(self.net,self.derivatives,**kwargs)
             elif deriv_method  == 'FD':
-                self.deriv_method = FD_engine(self.net,self.derivatives,dxs = [1e-3 for _ in range(len(self.input_vars))])
+                self.deriv_method = FD_engine(self.net,self.derivatives,**kwargs)
         elif isinstance(deriv_method,engine):
             self.deriv_method = deriv_method
         else:

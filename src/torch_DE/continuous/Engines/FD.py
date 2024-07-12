@@ -2,7 +2,7 @@ from typing import Dict,Callable,Iterable,Union,List
 from torch_DE.continuous.Engines import engine
 import torch
 class FD_engine(engine):
-    def __init__(self,net:torch.nn.Module,derivatives:Dict,dxs:Iterable,sdf:Callable = None,target_groups = None) -> None:
+    def __init__(self,net:torch.nn.Module,derivatives:Dict,dxs:Iterable,sdf:Callable = None) -> None:
         super().__init__()
         self.dims = len(dxs)
         if sdf is None:
@@ -14,7 +14,6 @@ class FD_engine(engine):
         self.derivatives = derivatives
         self.output_vars = self.get_output_vars(self.derivatives) 
 
-        self.target_groups = target_groups
         self.initial_step(*dxs)
  
     def initial_step(self,*dxs) -> None:
@@ -54,13 +53,13 @@ class FD_engine(engine):
         Returns
             Output_dict: Dict
         '''
-        self.target_groups = target_groups
-
         if target_groups is not None:
             target_groups = [target_groups] if isinstance(target_groups,str) else target_groups
+        
         if isinstance(x,dict):
             output = self.net_pass_from_dict(x,exclude=target_groups)
-            x_fd,groups,group_sizes = self.cat_groups({target_group:x[target_group] for target_group in target_groups})
+            to_diff =x if target_groups is None else {target_group:x[target_group] for target_group in target_groups}
+            x_fd,groups,group_sizes = self.cat_groups(to_diff)
             derivs = self.finite_diff(x_fd)
             output_derivs = self.group_output(derivs,groups,group_sizes)
             output.update(output_derivs)

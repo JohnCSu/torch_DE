@@ -7,7 +7,30 @@ from torch_DE.utils.data import PINN_Dataloader,PINN_dataset
 from torch_DE.utils import GradNorm,Loss_handler,add_time
 from torch_DE.post import Plotter,Evaluation,Tracker
 import os
+'''
+Unsteady Vortex Shedding PINN Problem
 
+This Problem solves unsteady flow across a cylinder at Re = 100. This example and initial conditions is from Wang et al from the repo: https://github.com/PredictiveIntelligenceLab/jaxpi
+
+The flow is simulated across a T = 10. We break down the time into 10 [0,1] intervals and train a single network on each.
+
+This problem demonstrates the following:
+- Non-dimensionisation of the problem
+    - significantly improves convergence rate
+
+- Using multiple networks to time step forward
+    - It is difficult to train the whole time interval. For each new interval, we set the initial contiion to be the output of the previous network at t=1
+    - We also use the first network as the initial state for the other networks. This significantly improves convergence and is akin to finetuning later time intervals
+
+- Using Finite difference rather than autograd for significantly faster training
+    - We can get a significant increase in speed up for a modest decrease in accuracy. We could set up a loop to first train using finite difference and then further tune with autograd
+
+- Using Data Driven constraint to represent the initial conditions
+    - PINNs are overly dissapative so need suitable Initial conditions to create vortex shedding. Otherwise the PINN will collapse into some steady state solution
+
+- Plotter Functionality in Torch_DE
+    - Helps reduce the code needed to create graphs
+'''
 if not os.path.exists('Networks'):
     os.mkdir('Networks')
 
@@ -119,7 +142,7 @@ losses.add_data_constraint('initial condition',['u','v'])
 plotter = Plotter(input_vars,output_vars)
 plotter.contour_points_from_domain(domain,time=True)
 
-for tp in range(0,10):
+for tp in range(0,1):
 #PYTORCH SETUP
     torch.manual_seed(1234)
     net = Fourier_Net(3,3,128,4,RWF= True,activation= 'tanh')
@@ -139,12 +162,12 @@ for tp in range(0,10):
     PINN = DE_Getter(net)
     PINN.set_vars(input_vars,output_vars)
     PINN.set_derivatives(derivatives)
-    # PINN.set_deriv_method('FD')
+    PINN.set_deriv_method('FD')
 
     # Training Loop
     weights = torch.ones(len(losses),dtype = torch.float32)
     print(f'Num Batches {len(DL)}')
-    for epoch in range(MAX_EPOCHS+1):
+    for epoch in range(1,MAX_EPOCHS+1):
         for x in DL:
             x = x.to(device = 'cuda')
             #Calculate Derivatives
