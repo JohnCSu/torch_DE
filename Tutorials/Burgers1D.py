@@ -59,7 +59,7 @@ PINN.set_deriv_method('AD')
 def burgers(u,u_t,u_x,u_xx,**kwargs):
     return u_t + u*u_x - (0.01/torch.pi)*u_xx
 
-losses = Loss_handler(dataset.group_names())
+losses = Loss_handler(dataset)
 losses.add_initial_condition('initial condition',{'u': lambda x : -torch.sin(torch.pi*x[:,0]) })
 losses.add_boundary('x0',{'u':0})
 losses.add_boundary('x1',{'u':0})

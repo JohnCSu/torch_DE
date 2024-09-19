@@ -27,7 +27,7 @@ DL = PINN_Dataloader(dataset)
 
 #Losses
 spring_eq = lambda u,u_tt,**kwargs: u_tt+u
-losses = Loss_handler(dataset.group_names())
+losses = Loss_handler(dataset)
 losses.add_initial_condition('initial condition',{'u': 0., 'u_t': 1.})
 losses.add_residual('collocation_points',{'spring_eq':spring_eq})
 
