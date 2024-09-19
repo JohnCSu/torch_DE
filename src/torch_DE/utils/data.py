@@ -6,6 +6,7 @@ import warnings
 from typing import Dict,List,Tuple,Union,Iterator
 import inspect
 from torch_DE.utils.time import add_time
+from torch_DE.symbols import Variable_dict
 class PINN_group():
     def __init__(self,name,inputs,batch_size,targets:Union[torch.Tensor,dict] = None,*,shuffle = False,add_time_interval:List = None,causal = False,time_col = -1):
         '''
@@ -96,9 +97,9 @@ class PINN_group():
 
 
 
-class PINN_dict(dict):
+class PINN_dict(Variable_dict):
     '''
-    Basically a regular dict but with some extra functionality e.g .to() to help cast tensors to devices
+    Basically a regular dict but with some extra functionality e.g .to() to help cast tensors to devices as well as keys using `sympy.Symbol()` see `torch_DE.symbols.Variable_dict` for moore info
     '''
     def to(self,*args, **kwargs):
         '''
@@ -117,7 +118,8 @@ class PINN_dataset(Dataset):
     '''
     def __init__(self) -> None:
         super().__init__()
-        self.groups:Dict[str,PINN_group] = PINN_dict()
+        self.groups:PINN_dict[str,PINN_group] = PINN_dict()
+
     def add_group(self,name:str,inputs:Union[torch.Tensor,List,Tuple],targets:Union[torch.Tensor,None] = None,batch_size:int = 1,*,causal:bool = False,shuffle: bool = False,time_col:int = -1):
         '''
         Add group to dataset
@@ -132,10 +134,35 @@ class PINN_dataset(Dataset):
         If multiple inputs are provided then it is assumed that the first dim size is the same across all inputs
         '''
         self.groups[name] = PINN_group(name,inputs,batch_size,targets,causal=causal,shuffle=shuffle,time_col= time_col)
-    def __len__(self):
+
+    def update_group(self,name,**kwargs):
+        '''
+        Update PINN_Group Attributes
+
+        Required args:
+            - name: str Name of group
+        
+        Optional Keywords (args found in `PINN_Group()`):
+            - inputs: Tensor or List|Tuple inputs of group. This represents inputs to the network. For multiple inputs, use a tuple or list
+            - batch_size: int size of batch size to use for that group. 
+            - targets: Tensor or None. Target output that matches with the input. Use this for data driven conditions
+            - shuffle: bool. Shuffles the data if true. Default is False
+
+        If multiple inputs are provided then it is assumed that the first dim size is the same across all inputs
+        '''
+        assert name in self.groups.keys(), 'Could not find the Pinn Group. Perhaps you misspelt it?'
+
+        group = self.groups[name]
+        for attr,value in kwargs.items():
+            assert hasattr(group,attr)
+            setattr(group,attr,value)
+
+
+
+    def __len__(self) -> int: 
         return max([len(group) for group in self.groups.values()])
     
-    def __getitem__(self,idx) -> PINN_dict:
+    def __getitem__(self,idx:int) -> PINN_dict:
         return PINN_dict({group.name:group.subgroup(idx[group.name]) for group in self.groups.values() })
 
     def Sampler(self):

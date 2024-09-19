@@ -59,7 +59,7 @@ class FD_engine(engine):
         if isinstance(x,dict):
             output = self.net_pass_from_dict(x,exclude=target_groups)
             to_diff =x if target_groups is None else {target_group:x[target_group] for target_group in target_groups}
-            x_fd,groups,group_sizes = self.cat_groups(to_diff)
+            x_fd,groups,group_sizes = self.dict_to_tensor(to_diff)
             derivs = self.finite_diff(x_fd)
             output_derivs = self.group_output(derivs,groups,group_sizes)
             output.update(output_derivs)

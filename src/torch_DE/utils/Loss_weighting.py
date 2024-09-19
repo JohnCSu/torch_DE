@@ -1,5 +1,37 @@
 import torch
 
+
+
+class Loss_Weighting():
+    def __init__(self,global_scheme = None,local_scheme = None) -> None:
+        
+        if isinstance(global_scheme,str):
+            self.global_weight_function = global_scheme
+        elif callable(global_scheme):
+            self.global_weight_function = 'custom'
+            self.custom_global_weighting(global_scheme)
+
+
+
+    def global_weighting(self,weights,*args,**kwargs):
+        return getattr(self,self.global_weight_function)
+
+
+    def identity(self,weights,*args,**kwargs):
+        return weights
+
+
+    def gradNorm(self,*args,**kwargs):
+        return GradNorm(*args,**kwargs)
+
+    def custom_global_weighting(self,func):
+        self.custom = func
+
+
+
+
+
+
 def GradNorm(net:torch.nn.Module,global_weights:torch.Tensor,*losses:torch.Tensor,alpha:float = 0.9,max_weight = None,eps = 1e-5):
     '''
     Gradient Normalisation Method by __ et al. Returns weights for each loss essentially by nomalising each loss's gradient so they are all roughlt the same size

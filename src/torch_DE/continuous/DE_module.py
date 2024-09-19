@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
 from .Engines import *
-from typing import Union
+from typing import Union,Any
 from torch_DE.utils.data import PINN_dict
+from torch_DE.symbols import *
+
 def aux_function(aux_func,is_aux = True) -> object:
     #aux_func has the output of (df,f) so we need it to output (df,(df,f))
     
@@ -20,9 +22,8 @@ def aux_function(aux_func,is_aux = True) -> object:
         return initial_aux_func
     
 
-
 class DE_Getter():
-    def __init__(self,net:nn.Module,input_vars :list = None , output_vars: list= None,derivatives: list= None,*args, **kwargs) -> None:
+    def __init__(self,net:nn.Module,input_vars :list[str] = None , output_vars: list[str] = None,derivatives: list= None,*args, **kwargs) -> None:
         '''
         Object to extract derivatives from a pytorch network via AD. Simplifies the process by abstracting away indexing to get specific derivatives with
         a dictionary with strings as keys.
@@ -37,9 +38,12 @@ class DE_Getter():
 
         By Default we use the Autodiff method to extract gradients. This can be changed useing the method set_deriv_method()
         '''
-        # super().__init__()
         self.net = net
-        self.derivatives = {}
+
+        
+
+
+        self.derivatives = Variable_dict()
         if input_vars is not None and output_vars is not None:
             self.set_vars(input_vars,output_vars)
         if derivatives is not None:
@@ -47,12 +51,16 @@ class DE_Getter():
             
         
     def set_vars(self,input_vars: iter,output_vars: iter,net_check = True):
-        self.input_vars = input_vars
-        self.output_vars = output_vars
+
+        '''
+        So we need a map between variables and indexing
+        '''
+        self.input_vars = Variable_list(map(to_Symbol,input_vars))
+        self.output_vars = Variable_list(map(to_Symbol,output_vars))
         
-        self.input_vars_idx = {input_var: i for i,input_var in enumerate(input_vars) }
+        self.input_vars_idx = Variable_dict({input_var: i for i,input_var in enumerate(input_vars) })
         
-        self.output_vars_idx ={output_var: i for i,output_var in enumerate(output_vars) }
+        self.output_vars_idx =Variable_dict({output_var: i for i,output_var in enumerate(output_vars) })
 
         #Add the network evaluation output to this dictionary
         self.derivatives.update({output_var: (i,) for i,output_var in enumerate(output_vars) })
@@ -79,33 +87,39 @@ class DE_Getter():
         #If '_' is used multiple times an error is raised. How to split longer names with '-' ? looks ugly though
         
         for deriv in derivatives:
-            #Checking if variables in each derivative have been defined
-            dep_var, indep_vars = deriv.split('_')
-            assert dep_var in self.output_vars, f'Output Variable {dep_var} does not exist'
-            
-            for indep_var in (indep_vars):
-                assert indep_var in self.input_vars, f"Variable {indep_var} is not an input Variable"
-            
-            #Work out the derivatives we need 
-            self.get_deriv_index(dep_var,tuple(indep_vars))
+            if isinstance(deriv,str):
+                #Checking if variables in each derivative have been defined
+                output_var, input_vars = deriv.split('_')
+                assert output_var in self.output_vars, f'Output Variable {output_var} does not exist'
+                
+                for input_var in (input_vars):
+                    assert input_var in self.input_vars, f"Variable {input_var} is not an input Variable"
+                
+                deriv = Deriv(output_var,[v for v in input_vars],len(input_vars))
 
+            #Work out the derivatives we need 
+            self.get_deriv_index(deriv)
+         
+                
+
+        self.derivatives = Variable_dict(self.derivatives)
         self.set_deriv_method('AD')
         
-    def get_deriv_index(self,dep_var:str,indep_vars: list)-> None: 
+    def get_deriv_index(self,deriv:Deriv)-> None: 
         # ignoring batch dimension
         # Input will be : ('u',['x','x'] )
         # indep_vars is treated as a list. For future so can handle longer string names
         # 0th dimension is dependent vars, 2nd dim is 1st order derivs, 3rd is 2nd ...
         
-        for i in range(1,len(indep_vars)+1):
-            var = ''.join(indep_vars[0:i])
-            deriv = f'{dep_var}_{var}'
-            
-
-            if deriv not in self.derivatives.keys():
-                index = (self.output_vars_idx[dep_var],) + tuple(self.input_vars_idx[indep_var] for indep_var in var)
+        order = deriv.order
+        output_var = deriv.output_var
+        for i in range(1,order+1):
+            if deriv.name not in self.derivatives.keys():
+                index = (self.output_vars_idx[output_var],) + tuple( [self.input_vars_idx[input_var] for input_var in deriv.list_input_vars()])
+                
                 self.derivatives[deriv] = index
-
+            if deriv.order > 1:
+                deriv = deriv.previous_Deriv()
 
     def set_deriv_method(self,deriv_method,**kwargs):
         '''

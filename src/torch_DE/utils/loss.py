@@ -2,8 +2,11 @@ import torch
 from collections.abc import Iterable
 from typing import Union,Dict,Callable,Tuple,List
 
+import torch.utils
+import torch.utils.data
 from torch_DE.utils.loss_weighting import GradNorm,Causal_weighting
 from torch_DE.utils.data import PINN_dict,PINN_dataset
+
 class Loss():
     def __init__(self,error_and_weights,power,causal,eps = 1):
         '''
@@ -15,7 +18,8 @@ class Loss():
         - 'individual_loss()'   : Dict of the form `(str,Tensor)` Returns the loss of each different loss type terms e.g. Residual, Boundary, Initial conditions
         - 'sum'                 : Tensor with 1 elem. Returns a single scalar value representing the objective function
         '''
-        self.error_and_weights = error_and_weights 
+        self.error_and_weights = error_and_weights
+        
         self._point_error = None
 
         self._weighted_error = None
@@ -28,7 +32,19 @@ class Loss():
         self.causal = causal
         self.eps = eps
         self.causal_weighting = None
+        
+        # self.global_weights = torch.ones(self.__len__())
 
+    
+    def num_losses(self):
+        return len(self.point_error(flatten=True))
+
+    # def __len__(self):
+    #     '''
+    #     Returns a 
+    #     '''
+    #     return list( [v for dict_1 in self.error_and_weights.values() for dict_2 in dict_1.values() for v in dict_2.values()] )
+    
     def point_error(self,flatten = False) -> Dict[str,Dict[str,Dict[str,Tuple[torch.Tensor,torch.Tensor]]]]:
         '''
         Returns:
@@ -142,28 +158,27 @@ class Loss():
                 print(f'Causal Weighting Stats: Max: {float(self.causal_weighting.max()):.3E}, Mean: {float(self.causal_weighting.mean()):.3E}, Min: {float(self.causal_weighting.min()):.3E}',end = '   ')
             print()
     
+
+    
+
 class Loss_handler():
-    def __init__(self,groups:PINN_dataset) -> None:
+    def __init__(self,dataset:PINN_dataset) -> None:
         '''
         Loss_handler is designed to work with PINN_dataholder and DE_Getter()
 
         '''
-        self.power = 2
-        if not isinstance(groups,(dict,PINN_dataset)):
-            raise TypeError('groups must be either type dict or PINN_dataset')
-        
-        if isinstance(groups,PINN_dataset):
-            groups = groups.groups
-        
-            
-        self.groups = groups
-        self.group_names = groups.keys()
+        self.update_dataset(dataset)        
         self.loss_groups = {}
         self.losses = None
         self.logger = None
+
+    def update_dataset(self,dataset:PINN_dataset):
+        assert isinstance(dataset,(PINN_dataset,torch.utils.data.Dataset))
+        self.dataset = dataset
+        self.groups = dataset.groups
+        self.group_names = self.groups.keys()
     def __call__(self,group_input:Dict,group_output:Dict,**kwargs):
         return self.calculate(group_input,group_output,**kwargs)
-
 
     def num_losses(self):
         '''
@@ -218,7 +233,7 @@ class Loss_handler():
         '''
 
         errors_and_weights = self.calculate_point_error_and_weights(group_input,group_output,loss_type_first)
-        self.losses = Loss(errors_and_weights,power,causal=causal,eps = eps)
+        self.losses = Loss(errors_and_weights,power, causal=causal,eps = eps)
 
         
         return self.losses

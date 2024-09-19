@@ -9,7 +9,7 @@ class engine():
     def __call__(self,*args,**kwargs):
         return self.calculate(*args,**kwargs)
 
-    def cat_groups(self,x: Union[torch.Tensor,PINN_dict],exclude:str = None) -> Tuple[torch.Tensor,Union[None,List[str]],Union[None,List[int]]]:
+    def dict_to_tensor(self,x: Union[torch.Tensor,PINN_dict],exclude:str = None) -> Tuple[torch.Tensor,Union[None,List[str]],Union[None,List[int]]]:
         '''
         merges all the different tensors into one big concatenated tensor along batch dimension (assumes that first dimenstion is batch dimension)
         also creates a list of group names and sizes.
@@ -27,11 +27,19 @@ class engine():
             raise ValueError(f'input should be of type dict or torch.tensor. Got instead {type(x)}')
     
 
+    def tensor_to_dict(self,x,group_names,group_sizes):
+        output = {}
+        start_idx = 0
+        for group_name,size in zip(group_names,group_sizes):
+            output[group_name:x[start_idx:start_idx+size]]
+            start_idx += size
+
+        return output
     def net_pass_from_dict(self,x_dict,exclude = None)->  Dict[str,Dict[str,torch.Tensor]]:
         '''
         Allow passing a dict like object containing tensors to a network and output the results into a dictionary with the same keys as the input
         '''
-        x,group_names,group_sizes = self.cat_groups(x_dict,exclude=exclude)
+        x,group_names,group_sizes = self.dict_to_tensor(x_dict,exclude=exclude)
         u = self.net(x)
         #We need to put this back into dictionary format
         output = {}
