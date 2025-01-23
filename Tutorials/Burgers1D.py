@@ -28,7 +28,7 @@ tmin,tmax = (0,1)
 
 domain = Rectangle((( xmin,tmin),(xmax,tmax) ),'corners')
 domain = Domain2D(base = domain)
-sampled_points = domain.generate_points(100_000)
+sampled_points = domain.generate_points(50_000)
 
 num_points = 100
 

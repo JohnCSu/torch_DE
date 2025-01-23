@@ -51,7 +51,7 @@ def AllenCahn(u_t,u_xx,u,**kwargs):
 input_vars,output_vars = (['x','t'],['u'])
 derivatives = get_derivatives(input_vars,output_vars,AllenCahn)
 
-losses = Loss_handler(groups=dataset)
+losses = Loss_handler(dataset)
 losses.add_periodic('boundary_0','boundary_1','u')
 losses.add_periodic('boundary_0','boundary_1','u_x')
 losses.add_initial_condition('t0',{'u':u_IC})

@@ -4,7 +4,7 @@ from torch_DE.continuous import DE_Getter
 from torch_DE.continuous.Networks import MLP,Wang_Net,Fourier_Net
 from torch.optim.lr_scheduler import StepLR
 from torch_DE.utils.data import PINN_Dataloader,PINN_dataset
-from torch_DE.utils import GradNorm,Loss_handler,add_time
+from torch_DE.utils import GradNorm,Loss_handler,add_time,set_time
 from torch_DE.post import Plotter,Evaluation,Tracker
 import os
 '''
@@ -24,6 +24,7 @@ This problem demonstrates the following:
 
 - Using Finite difference rather than autograd for significantly faster training
     - We can get a significant increase in speed up for a modest decrease in accuracy. We could set up a loop to first train using finite difference and then further tune with autograd
+    - Also A significant decrease in memory usage as we only have to back prop once.
 
 - Using Data Driven constraint to represent the initial conditions
     - PINNs are overly dissapative so need suitable Initial conditions to create vortex shedding. Otherwise the PINN will collapse into some steady state solution
@@ -120,7 +121,7 @@ u_inlet_func = lambda x : 4*U*x[:,1]*(ymax-x[:,1])/(ymax**2)
 outlet_func = lambda x_dict,out_dict: 1/Re*out_dict['outlet']['u_x'] - out_dict['outlet']['p']
 
 #Losses
-losses = Loss_handler(dataset.groups)
+losses = Loss_handler(dataset)
 losses.add_boundary('inlet',{'u':u_inlet_func,
                             'v':0})
 
@@ -141,19 +142,18 @@ losses.add_data_constraint('initial condition',['u','v'])
 #Post
 plotter = Plotter(input_vars,output_vars)
 plotter.contour_points_from_domain(domain,time=True)
-
-for tp in range(0,1):
+net = Fourier_Net(3,3,128,4,RWF= True,activation= 'tanh')
+for tp in range(0,10):
 #PYTORCH SETUP
     torch.manual_seed(1234)
-    net = Fourier_Net(3,3,128,4,RWF= True,activation= 'tanh')
 
-    if tp > 0:
-        net.load_state_dict(torch.load(f'Networks/Network_{tp-1}.pth'))
+    if tp > 0:        
         # Set New IC
         with torch.no_grad():
-            out = net.cpu()(x_IC.cpu())
+            x_Last = set_time('single point',x_IC,point = 1.)
+            out = net.cpu()(x_Last.cpu())
             u0,v0 = out[:,0],out[:,1]
-            dataset.add_group('initial condition',x_IC,{'u':u0,'v':v0},batch_size=1000,shuffle= True)
+            dataset.update_group('initial condition',inputs = x_IC,targets = {'u':u0,'v':v0})
 
     optimizer = torch.optim.Adam(params = net.parameters(), lr = 1e-3)
     LR_sch = StepLR(optimizer,10000,0.9)

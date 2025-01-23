@@ -55,7 +55,7 @@ derivative_names = get_derivatives(input_vars,output_vars,Stokes_Flow_x,Stokes_F
 
 inlet_weight_func = lambda x: 1-10*torch.abs(x[:,0])
 
-losses = Loss_handler(dataset.groups)
+losses = Loss_handler(dataset)
 losses.add_boundary('no slip',{'u':0,
                                'v':0})
 losses.add_boundary('inlet',{'u':1,
@@ -106,11 +106,10 @@ with torch.no_grad():
     x = xy[0].flatten()
     y = xy[1].flatten()
 
-
     net = net.cpu()
     u = net(torch.stack([x,y],-1))
 
-    plt.title("u for LDC Re=100")
+    plt.title("v for LDC Re=100")
     plt.tricontourf(x,y,u[:,1],levels =100,cmap = 'jet')
     plt.colorbar()
     plt.xlabel('x')

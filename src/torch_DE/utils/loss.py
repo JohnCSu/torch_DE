@@ -33,7 +33,6 @@ class Loss():
         self.eps = eps
         self.causal_weighting = None
         
-        # self.global_weights = torch.ones(self.__len__())
 
     
     def num_losses(self):
@@ -81,7 +80,7 @@ class Loss():
 
         return self._weighted_error
     
-    def MSE(self,flatten = False) -> Dict[str,Dict[str,Dict[str,torch.Tensor]]]:
+    def MSE(self,flatten = False,names = False) -> Dict[str,Dict[str,Dict[str,torch.Tensor]]]:
         '''
         Returns:
             Dict of Dictionaries where `(str,(str,(str,Tensor))))` here Tensor is a single element. Returns the MSE of each Tensor in weighted_error()
@@ -92,11 +91,11 @@ class Loss():
             self._MSE  ={loss_type : {group_name:{term_name: point_loss.mean() for term_name,point_loss in group.items()} for group_name,group in loss_group.items() } for loss_type,loss_group in self.weighted_error().items() } 
         
         if flatten:
-            return self.flatten(self._MSE,order = 2)
+            return self.flatten(self._MSE,order = 2,names=names)
 
         return self._MSE
     
-    def group_loss(self,flatten =False) -> Dict[str,Dict[str,torch.Tensor]]:
+    def group_loss(self,flatten =False,names = False) -> Dict[str,Dict[str,torch.Tensor]]:
         '''
         Returns:
             Dict of Dictionaries where `(str,(str,Tensor)))`. Returns the losses of each group under each loss term.\n
@@ -109,11 +108,11 @@ class Loss():
             self._group_loss = group_loss
         
         if flatten:
-            return self.flatten(self._group_loss,order = 1)
+            return self.flatten(self._group_loss,order = 1,names=names)
 
         return self._group_loss
     
-    def individual_loss(self,flatten =False) -> Dict[str,torch.Tensor]:
+    def individual_loss(self,flatten =False,names = False) -> Dict[str,torch.Tensor]:
         '''
         Returns:
             Dict where `Dict[str,Tensor]` Returns the loss of each different loss type e.g. single value for Residual, Boundary, Initial conditions term
@@ -124,7 +123,7 @@ class Loss():
             individual_loss = {loss_type: sum(loss_group.values()) for loss_type,loss_group in self.group_loss().items()}
             self._individual_loss = individual_loss
         if flatten:
-            return self.flatten(self._group_loss,order = 0)
+            return self.flatten(self._group_loss,order = 0,names=names)
         
         return self._individual_loss
     
@@ -138,26 +137,38 @@ class Loss():
         return self._sum
 
     @staticmethod
-    def flatten(loss:Dict,order):
+    def flatten(loss:Dict,order,names = False):
         if order == 0:
             #Dict[str,tensor]
-            return list(loss.values())
+            flattened_names = list(loss.keys())
+            flattened_losses =  list(loss.values())
         if order == 1:
             #Dict[str,Dict[str,torch.Tensor]]:
-            return list([v for dict_1 in loss.values() for v in dict_1.values()])
+            flattened_names = [f'{group_name}_{v}' for group_name,dict_1 in loss.items() for v in dict_1.keys()]
+            flattened_losses = list([v for dict_1 in loss.values() for v in dict_1.values()])
         if order == 2:
             #Dict[str,Dict[str,Dict[str,torch.Tensor]]]
-            return list([v for dict_1 in loss.values() for dict_2 in dict_1.values() for v in dict_2.values()])
-    
-    def print_losses(self,epoch):
+            flattened_names = list([f'{indi_name}_{group_name}_{v}' for indi_name,dict_1 in loss.items() for group_name,dict_2 in dict_1.items() for v in dict_2.keys()])
+            flattened_losses = list([v for dict_1 in loss.values() for dict_2 in dict_1.values() for v in dict_2.values()])
+
+        if names:
+            return flattened_losses,flattened_names
+        else:
+            return flattened_losses 
+    def print_losses(self,epoch,weights = None,summary = 'groups'):
         with torch.no_grad():
             print(f'Epoch {epoch} :--: Total Loss {float(self.sum()): .3E}  ',end = '  ')
-            for name,loss in self.individual_loss().items():
-                print( f'{name} Loss: {float(loss): .3E}',end = '  ')
-            if self.causal_weighting is not None:
-                print(f'Causal Weighting Stats: Max: {float(self.causal_weighting.max()):.3E}, Mean: {float(self.causal_weighting.mean()):.3E}, Min: {float(self.causal_weighting.min()):.3E}',end = '   ')
-            print()
-    
+
+            if summary == 'groups':
+                for name,loss in self.individual_loss().items():
+                    print( f'{name} Loss: {float(loss): .3E}',end = '  ')
+                if self.causal_weighting is not None:
+                    print(f'Causal Weighting Stats: Max: {float(self.causal_weighting.max()):.3E}, Mean: {float(self.causal_weighting.mean()):.3E}, Min: {float(self.causal_weighting.min()):.3E}',end = '   ')
+                print()
+            if summary == 'full':
+                for name,loss in self.MSE(flatten=True):
+                    print( f'{name} Loss: {float(loss): .3E}',end = '  ')
+
 
     
 

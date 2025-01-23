@@ -32,7 +32,7 @@ class Loss_Weighting():
 
 
 
-def GradNorm(net:torch.nn.Module,global_weights:torch.Tensor,*losses:torch.Tensor,alpha:float = 0.9,max_weight = None,eps = 1e-5):
+def GradNorm(net:torch.nn.Module,global_weights:torch.Tensor,*losses:torch.Tensor,alpha:float = 0.9,max_weight = None,eps = 1e-5)->torch.Tensor:
     '''
     Gradient Normalisation Method by __ et al. Returns weights for each loss essentially by nomalising each loss's gradient so they are all roughlt the same size
     '''
