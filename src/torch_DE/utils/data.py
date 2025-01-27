@@ -7,14 +7,30 @@ from typing import Dict,List,Tuple,Union,Iterator
 import inspect
 from torch_DE.utils.time import add_time
 from torch_DE.symbols import Variable_dict
+from torch import Tensor
+
 class PINN_group():
-    def __init__(self,name,inputs,batch_size,targets:Union[torch.Tensor,dict] = None,*,shuffle = False,add_time_interval:List = None,causal = False,time_col = -1):
+    def __init__(self,name:str,inputs:Tensor,batch_size:int,targets:Union[torch.Tensor,dict],input_vars:list[str],*,shuffle = False):
         '''
         Container for data for a defined grouped
+
+        inputs:
+            - name : str name of group
+            - inputs: Tensor: full tensor of group of size NxD where N is the number of input points and D is the dimensional input of the network
+            - batch_size: int batch size. must be smaller than N
+            - targets: Tensor | dict: target data that the output of the network with respect to this specific group must match.
+            - variables: list[str] | None: variable names of each input dimension. should be the same size as D 
+
         '''
-        self.name = name
-        self.inputs = inputs
-        self.batch_size = batch_size
+        self.name:str = name
+        self.batch_size:int = batch_size
+        self.N,self.D = inputs.shape
+
+        self.input_vars:list[str] = input_vars
+        self.inputs:dict = {'input': inputs}
+        self.inputs.update({input_var:inputs[:,i] for i,input_var in enumerate(input_vars)})
+        self.has_multiple_inputs = False
+        self.checks()
 
         if isinstance(targets,dict):
             self.targets = PINN_dict(targets)
@@ -22,46 +38,30 @@ class PINN_group():
             self.targets = PINN_dict({'target': targets}) if isinstance(targets,torch.Tensor) else None
         
         self.shuffle = shuffle 
-        self.causal = causal
-        self.time_col = time_col
-        #Check
-        self.has_multiple_inputs = False
-        if isinstance(self.inputs,(list,tuple)):
-            self.has_multiple_inputs = True
-            #Check if first dim is same size
-            assert set([x.shape[0] for x in self.inputs]) == 1 , 'The size of first dim must be the same across inputs'
-            
-        else:
-            if not isinstance(self.inputs,torch.Tensor):
-                raise TypeError('inputs can only be typr torch.Tensor, List or tuple!')
 
-        assert batch_size <= self.__len__()
-
-        self.num_elems = self.__len__()
-
-
-        if self.has_multiple_inputs and self.causal:
-            raise ValueError('Causal sorting currently does not support groups with multiple input tensors')
+        
 
     def __len__(self):
-        if self.has_multiple_inputs:
-            return len(self.inputs[0].shape[0])
-        else:
-            return self.inputs.shape[0]
+        return int(self.N)
+
+    def checks(self):
+        assert len(self.inputs['input'].shape) == 2
+        assert self.batch_size <= self.__len__()
+        assert len(self.input_vars) == self.D
+
 
     def to(self,*args,**kwargs):
-        if self.has_multiple_inputs:
-            self.inputs = tuple(x.to(*args,**kwargs) for x in self.inputs)
-        else:
-            self.inputs=self.inputs.to(*args,**kwargs)
+        self.inputs = {key:x.to(*args,**kwargs) for key,x in self.inputs.items()}
         if self.targets is not None:
-            self.targets = self.targets.to(*args,**kwargs)
+            self.targets = {key:x.to(*args,**kwargs) for key,x in self.targets.items()}
         return self
+    
+
     def subgroup(self,idx):
         '''
         Given an list of indices, return a smaller PINN group containing data only on those indices. This is used for batching each group
         '''
-        inputs = self.inputs[idx]
+        inputs = self.inputs['input'][idx]
         
         if self.has_multiple_inputs:
             inputs = tuple(x[idx] for x in self.inputs)
@@ -69,16 +69,8 @@ class PINN_group():
         targets = None
         if self.targets is not None:
             targets = {target: target_tensor[idx] for target,target_tensor in self.targets.items()}
-        
-        if self.causal:
-            #Find col corresponding to time column, sort asending order and return indices
-            sorted_time_idx = inputs[:,self.time_col].sort()[1]
-            inputs = inputs[sorted_time_idx]
-            if self.targets is not None:
-                for target in self.targets.keys():
-                    self.targets[target] = self.targets[target][sorted_time_idx] 
 
-        return PINN_group(self.name,inputs,self.batch_size,targets,causal = self.causal,shuffle=self.shuffle)
+        return PINN_group(self.name,inputs,self.batch_size,targets,input_vars=self.input_vars,shuffle=self.shuffle)
 
 
     def add_time(self,time_type,time_interval:Union[list,tuple] = None,point:float = None,dim:int = -1):
@@ -116,10 +108,10 @@ class PINN_dataset(Dataset):
 
     The `__getitem__` method returns a `PINN_dict` object where keys are group names. The items are a subgroup of the `PINN_group()` i.e. a `PINN_group()` containing a batch of the original inputs 
     '''
-    def __init__(self) -> None:
+    def __init__(self,input_vars) -> None:
         super().__init__()
         self.groups:PINN_dict[str,PINN_group] = PINN_dict()
-
+        self.input_vars = input_vars
     def add_group(self,name:str,inputs:Union[torch.Tensor,List,Tuple],targets:Union[torch.Tensor,None] = None,batch_size:int = 1,*,causal:bool = False,shuffle: bool = False,time_col:int = -1):
         '''
         Add group to dataset
@@ -133,7 +125,7 @@ class PINN_dataset(Dataset):
 
         If multiple inputs are provided then it is assumed that the first dim size is the same across all inputs
         '''
-        self.groups[name] = PINN_group(name,inputs,batch_size,targets,causal=causal,shuffle=shuffle,time_col= time_col)
+        self.groups[name] = PINN_group(name,inputs,batch_size,targets,input_vars=self.input_vars,shuffle=shuffle)
 
     def update_group(self,name,**kwargs):
         '''
@@ -217,13 +209,13 @@ class PINN_sampler(Sampler):
         '''
         indices = {}
         #Figure out Maximum number of batches
-        num_batches = {group.name: group.num_elems//group.batch_size for group in groups.values()}
+        num_batches = {group.name: len(group)//group.batch_size for group in groups.values()}
         max_batches = max(num_batches.values())
 
         for group in groups.values():
             repeats = max_batches//num_batches[group.name]
             remainder = max_batches % num_batches[group.name]
-            idx = torch.randperm(group.num_elems).repeat(repeats) if group.shuffle else torch.arange(group.num_elems).repeat(repeats)
+            idx = torch.randperm(len(group)).repeat(repeats) if group.shuffle else torch.arange(len(group)).repeat(repeats)
             #Randomly fill the last remainder if not equal insize            
             idx = torch.cat([idx,idx[:remainder*group.batch_size]])
             indices[group.name] = idx
@@ -234,7 +226,7 @@ class PINN_sampler(Sampler):
         '''
         Calculates group with the most number of batches
         '''
-        num_batches,num_remainders = zip(*[ (group.num_elems//group.batch_size,group.num_elems % group.batch_size) for group in self.groups.values()])
+        num_batches,num_remainders = zip(*[ (len(group)//group.batch_size,len(group) % group.batch_size) for group in self.groups.values()])
         max_batches,max_idx = max(num_batches), np.argmax(num_batches)
         if self.remainder_flag is False:
             # If not max group not divisible by batch size then raise warning

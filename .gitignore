@@ -3,7 +3,10 @@ __pycache__
 *lightning_logs*
 build/*
 dist/*
-Tutorials/*.png
-Tutorials/*.jpg
-Tutorials/*.gif
-Tutorials/*.ipynb
+Tutorials/**/*.png
+Tutorials/**/*.jpg
+Tutorials/**/*.gif
+Tutorials/**/*.ipynb
+Tutorials/**/*.pth
+Tutorials/Unsteady_Cylinder/Images/*
+Tutorials/Unsteady_Cylinder/Networks/*

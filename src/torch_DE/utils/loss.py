@@ -1,11 +1,37 @@
 import torch
 from collections.abc import Iterable
 from typing import Union,Dict,Callable,Tuple,List
-
+from torch import Tensor
 import torch.utils
 import torch.utils.data
 from torch_DE.utils.loss_weighting import GradNorm,Causal_weighting
-from torch_DE.utils.data import PINN_dict,PINN_dataset
+from torch_DE.utils.data import PINN_dict,PINN_dataset,PINN_group
+
+import pandas as pd
+
+
+import inspect
+from functools import wraps
+from torch import Tensor,TensorType
+
+def DE_func(func):
+    '''
+    Decorator to turn your function into form suitable for troch DE. This is primarily for functions defined explicitly using their input varible names
+    e.g. Poisson2D(u_xx,u_zz,x,y,**kwargs). Important note that **kwargs keyword variable MUST be defined otherwise an error is raised. The kwargs will absorb any
+    unused variables (e.g. u_x , u_z for the above equation)
+
+    Otherwise functions must be defined using dictionaries as inputs in the form f(x,y) where  x is the dictionary containing the corresponding input data 
+    and y is a dictionary containing output and derivatives of the network
+    '''
+    sig = inspect.signature(func)
+    assert inspect.Parameter.VAR_KEYWORD in [param.kind for param in sig.parameters.values()] , 'To use residual decorator, you need to have the **kwargs declared in your function input e.g foo(x,y,**kwargs)'
+    @wraps(func)
+    def DE_func_wrapper(network_input:dict[str,TensorType],network_output:dict[str,TensorType]):
+        return func(**network_input,**network_output )
+    DE_func_wrapper.is_decorated = True
+    return DE_func_wrapper
+
+
 
 class Loss():
     def __init__(self,error_and_weights,power,causal,eps = 1):
@@ -183,27 +209,31 @@ class Loss_handler():
         self.losses = None
         self.logger = None
 
+
+        self.losses: pd.DataFrame = pd.DataFrame(columns = [  'group',
+                                                'loss_type',
+                                                'variable',
+                                                'evaluation',
+                                                'weighting',
+                                                'residual',
+                                                'MSE'])
+                                                
+
     def update_dataset(self,dataset:PINN_dataset):
         assert isinstance(dataset,(PINN_dataset,torch.utils.data.Dataset))
         self.dataset = dataset
         self.groups = dataset.groups
         self.group_names = self.groups.keys()
+
+
+
+
     def __call__(self,group_input:Dict,group_output:Dict,**kwargs):
         return self.calculate(group_input,group_output,**kwargs)
 
-    def num_losses(self):
-        '''
-        Calculate number of losses
-        '''
-        n = 0
-        for loss_type in self.loss_groups.values():
-            for group in loss_type.values():
-                n+= len(group.values())   
-        
-        return n
     
     def __len__(self):
-        return self.num_losses()
+        return len(self.losses)
 
     def log_loss(self):
         losses = self.losses.individual_loss()
@@ -217,39 +247,28 @@ class Loss_handler():
             self.logger['total'].append(float(self.losses.sum().cpu()))
 
 
-    def print_losses(self,epoch):
-        print(f'Epoch {epoch} :--: ',end = '  ')
-        for name,loss in self.losses.individual_loss().items():
-            print( f'{name} Loss: {float(loss): .3E}',end = '  ')
-        print()
-
-    def calculate(self,group_input:Dict,group_output:Dict,loss_type_first = False,power:int = 2,causal = False,eps = 1.)->Loss:
+    def check_groups(self,dataset:PINN_dataset):
         '''
-        Calculate losses. In Loss Handler we store terms in a 3-nested dictionary so accessing indiviudual terms is loss_type -> group__name -> var_name -> Output
-        Inputs:
-            - group_input: input training data. Should be of instance data-_handler or dict like
-            - group_output: output network evaluation from DE_Getter. Should be dict like
-            - power: power to raise loss terms by. Default is 2
-            - causal: bool decide if to implement causality weighting for residuals. Note assumes data is sorted along time axis. Default False
-            - eps: eps parameter for causality weighting. Default 1
-
-        Output:
-            - Loss object . Call the following methods to get the following different outputs:
-                - `point_error()`   : Dict of Dict of Dict where `(str,(str,(str,Tensor))))`. Each Tensor is the results of a specific function applied to a group output e.g `loss['boundary']['noslip']['u']` contains the point error between the netowrk output u and the actual boundary value
-                - `weighted_error()`: Dict of Dict of Dict where `(str,(str,(str,Tensor))))`. Each Tensor is the results of a specific function applied to a group output e.g `loss['boundary']['noslip']['u']` is the weighter point error between the netowrk output u and the actual boundary value
-                - `MSE()`           : Dict of Dictionaries where `(str,(str,(str,Tensor))))` Here Tensor is a single element scalar. Returns the MSE of each Tensor across the batch dimension in weighted error
-                - `group_loss()`    : Dict of Dictionaries where `(str,(str,Tensor)))`. Returns the losses of each group under each loss term. e.g in 2D Fluid Flow `loss['boundary']['no slip']` will be the sum of the loss constraints of both u and v 
-                - `individual_loss()`    : Dict where 1(str,Tensor)` Returns the loss of each different loss type terms e.g. Residual, Boundary, Initial conditions
-                - `sum()`           : Tensor with 1 elem. Returns a single scalar value representing the objective function
+        Check that the groups specified are matched one-to-one with the PINN dataset, Otherwise raise an error
         '''
 
-        errors_and_weights = self.calculate_point_error_and_weights(group_input,group_output,loss_type_first)
-        self.losses = Loss(errors_and_weights,power, causal=causal,eps = eps)
+        pass
 
+    def calculate(self,batched_input:dict[str,PINN_group],batched_output:dict[str,dict[str,Tensor]],power:int = 2)->Loss:
+        # Dict[group,dict[loss_type,tensor]]
+        error_func = lambda x,y: torch.abs(x-y).pow(power)
+
+
+        for group in batched_input.keys():
+            group_bool = self.losses['group'] == group
+            
+            group_output = batched_output[group]
+            group_input = batched_input[group].inputs
+            
+            self.losses.loc[group_bool,'residual'] = self.losses.loc[group_bool,'evaluation'].apply(lambda func: func(group_input,group_output))
+            
         
         return self.losses
-       
-
 
     def calculate_point_error_and_weights(self,group_input:Dict,group_output:Dict,loss_group_first = True) -> Tuple[Dict[str,Dict[str,Dict[str,torch.Tensor]]],Dict[str,Dict[str,Dict[str,torch.Tensor]]]]:
         '''
@@ -259,7 +278,6 @@ class Loss_handler():
         '''
         point_losses = {}
 
-        
         for (loss_type,loss_group) in self.loss_groups.items():
                 point_losses[loss_type] = {}
                 for (group_name,group) in loss_group.items():
@@ -301,59 +319,105 @@ class Loss_handler():
             custom_dic[group][func_name] = (f(kwargs),self.make_weighting_func(weight,group))
 
 
-    def set_terms(self,loss_type,loss_type_func,group,var_dict,weighting):
-        loss_group = self.group_checker(loss_type,group)
+    def set_terms(self,loss_type,group,var_dict: dict[str,Union[float,Callable]], weighting: Union[float,dict,Callable]):
+        # The output of DE_Getter is a dictionary [group][vars]
+
+        #Get all the losses associated with the loss_type (e.g. boundary or IC) and group
+
+
+        group_loss_type_df = self.losses[(self.losses['group'] == group)&(self.losses['loss_type'] == loss_type)]
+        #We want to match up the weighting to the var_dict
         if not isinstance(weighting,dict):
-            weighting = {var_comp: weighting for var_comp in var_dict.keys()}
-        for weight,(var_comp,value_func) in zip(weighting.values(),var_dict.items()):
-            loss_group[group][var_comp] = (getattr(self,loss_type_func)(group,var_comp,value_func),self.make_weighting_func(weight,group))  
-
+            weighting = {var_comp: weighting for var_comp in var_dict.keys()}  
     
+        for (var_name,evaluation_func),(weighting) in zip(var_dict.items(),weighting.values()):
 
-    def add_boundary(self,group,bound_dict,weighting:Union[float,Callable,Dict] = 1):
-        
-        self.set_terms('boundary','data_loss_func',group,bound_dict,weighting)
-    
-    def add_data_constraint(self,group:str,data_keys:List[str] = None,weighting = 1):
+            #First Check that varible not already added in loss type for group
+            if var_name in group_loss_type_df['variable']:
+                raise ValueError(f'variable name {var_name} already exists in group {group} as a {loss_type} term')
+            
+            weight_func = lambda group_input : weighting if not callable(weight_func) else weighting 
+                
+            loss = pd.DataFrame([{
+                'loss_type': loss_type,
+                'group': group,
+                'variable': var_name,
+                'evaluation': evaluation_func,
+                'weighting': weight_func,
+                'residual': None,
+                'MSE': None
+            }])
+
+            self.losses = pd.concat([self.losses,loss])
+    @staticmethod
+    def create_residual_from_rhs(var_name,rhs):
         '''
-        Add a data driven contstraint to a PINN. This is used when we have data is strictly tied to the input data i.e. data from a sensor over time. 
+        Given a right hand side (rhs), create a residual function such that var_name-rhs = 0
         '''
-        # self.set_terms('data_driven','data_driven',group,data_keys,weighting)
-
-        if self.groups[group].targets is None:
-            raise ValueError(f'The group {group} does not have any target data attributed to it')
-
-        if data_keys is None:
-            data_keys = self.groups[group].targets.keys()
-
-        loss_group = self.group_checker('data driven',group)
-        if not isinstance(weighting,dict):
-            weighting = {var_comp: weighting for var_comp in data_keys}
         
+        rhs_func = lambda **kwargs: rhs if not callable(rhs) else rhs
+        rhs_func = DE_func(rhs_func)
+        
+        #Residual Functions is group_dict[var_name] - rhs(x)
+        return lambda group_input,group_output: group_output[var_name] - rhs_func(group_input,group_output)
 
-        for key,weight in zip(data_keys,weighting.values()):
-            loss_group[group][key] = (self.data_driven_func(group,key), self.make_weighting_func(weight,group))
-    
-    def add_residual(self,group,res_dict:dict,weighting = 1):
-        self.set_terms('residual','residual_loss_func',group,res_dict,weighting)
+    def add_boundary(self,group,bound_dict:dict[str,Union[float,Callable]],weighting:Union[float,Callable,Dict] = 1):
+        bound_dict = {var_name:self.create_residual_from_rhs(var_name,rhs) for var_name,rhs in bound_dict.items()}
+        self.set_terms('boundary',group,bound_dict,weighting)
+
     
     def add_initial_condition(self,group:str,ic_dict:dict,weighting = 1):
-        self.set_terms('initial condition','data_loss_func',group,ic_dict,weighting)
+        ic_dict = {var_name:self.create_residual_from_rhs(var_name,rhs) for var_name,rhs in ic_dict.items()}
+        self.set_terms('initial condition',group,ic_dict,weighting)
         
-    def add_periodic(self,group_1:str,group_2:str,var:str,weighting = 1):
-        '''
-        We treat group_1 as the main group and group_2 as the secondary so this is stored in the group_1
+    def add_residual(self,group,residuals:dict[str,Callable],weighting = 1): 
+        self.set_terms('residual',group,residuals,weighting)
+        
 
-        The key structure is [group_1][group_2_var]
-        '''
-        loss_group = self.group_checker('periodic',group_1)
-        assert group_2 in self.groups, "The group {group} does not exist in the loss handler. Please check your spelling"
+    # def add_boundary(self,group,bound_dict,weighting:Union[float,Callable,Dict] = 1):
+        
+    #     self.set_terms('boundary','data_loss_func',group,bound_dict,weighting)
+    
+    # def add_data_constraint(self,group:str,data_keys:List[str] = None,weighting = 1):
+    #     '''
+    #     Add a data driven contstraint to a PINN. This is used when we have data is strictly tied to the input data i.e. data from a sensor over time. 
+    #     '''
+    #     # self.set_terms('data_driven','data_driven',group,data_keys,weighting)
 
-        if isinstance(var,str):
-            loss_group[group_1][f'{group_2}_{var}'] = (self.periodic_loss_func(group_1,group_2,var),self.make_weighting_func(weighting,group_1))
+    #     if self.groups[group].targets is None:
+    #         raise ValueError(f'The group {group} does not have any target data attributed to it')
+
+    #     if data_keys is None:
+    #         data_keys = self.groups[group].targets.keys()
+
+    #     loss_group = self.group_checker('data driven',group)
+    #     if not isinstance(weighting,dict):
+    #         weighting = {var_comp: weighting for var_comp in data_keys}
+        
+
+    #     for key,weight in zip(data_keys,weighting.values()):
+    #         loss_group[group][key] = (self.data_driven_func(group,key), self.make_weighting_func(weight,group))
+    
+    # def add_residual(self,group,res_dict:dict,weighting = 1):
+    #     self.set_terms('residual','residual_loss_func',group,res_dict,weighting)
+    
+    # def add_initial_condition(self,group:str,ic_dict:dict,weighting = 1):
+    #     self.set_terms('initial condition','data_loss_func',group,ic_dict,weighting)
+        
+    # def add_periodic(self,group_1:str,group_2:str,var:str,weighting = 1):
+    #     '''
+    #     We treat group_1 as the main group and group_2 as the secondary so this is stored in the group_1
+
+    #     The key structure is [group_1][group_2_var]
+    #     '''
+    #     loss_group = self.group_checker('periodic',group_1)
+    #     assert group_2 in self.groups, "The group {group} does not exist in the loss handler. Please check your spelling"
+
+    #     if isinstance(var,str):
+    #         loss_group[group_1][f'{group_2}_{var}'] = (self.periodic_loss_func(group_1,group_2,var),self.make_weighting_func(weighting,group_1))
             
-        else:
-            raise TypeError(f'varaible var needs to be type string Instead found type f{type(var)}')
+    #     else:
+    #         raise TypeError(f'varaible var needs to be type string Instead found type f{type(var)}')
 
     
 

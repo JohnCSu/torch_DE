@@ -1,7 +1,5 @@
 import torch
 
-
-
 class Loss_Weighting():
     def __init__(self,global_scheme = None,local_scheme = None) -> None:
         
@@ -26,9 +24,6 @@ class Loss_Weighting():
 
     def custom_global_weighting(self,func):
         self.custom = func
-
-
-
 
 
 
