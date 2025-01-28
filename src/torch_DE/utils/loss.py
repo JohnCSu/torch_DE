@@ -34,169 +34,112 @@ def DE_func(func):
 
 
 class Loss():
-    def __init__(self,error_and_weights,power,causal,eps = 1):
+    def __init__(self,loss_df:pd.DataFrame,aggregation_method:str = 'mean',power:Union[int, None] = 2):
         '''
-        Stores the losses from the loss handler. To access values use the following methods:
-
-        - `point_error()`       : Dict of Dict of Dict where `(str,(str,(str,Tensor))))`. Each Tensor is the results of a specific function applied to a group output e.g `loss['boundary']['noslip']['u']` contains the point error between the netowrk output u and the actual boundary value
-        - `MSE()`               : Dict of Dictionaries where `(str,(str,(str,Tensor))))` here Tensor is a single element. Returns the MSE of each Tensor in point_error
-        - `group_loss()`        : Dict of Dictionaries where `(str,(str,Tensor)))`. Returns the losses of each group under each loss term. e.g in 2D `loss['boundary']['no slip']` will be the sum of the loss constraints of both u and v 
-        - 'individual_loss()'   : Dict of the form `(str,Tensor)` Returns the loss of each different loss type terms e.g. Residual, Boundary, Initial conditions
-        - 'sum'                 : Tensor with 1 elem. Returns a single scalar value representing the objective function
+        Stores the losses from the loss handler. Provides additional functionality and variables to help calculate variables.
         '''
-        self.error_and_weights = error_and_weights
-        
-        self._point_error = None
-
-        self._weighted_error = None
-        self._MSE = None
-        self._group_loss =None
-        self._individual_loss = None
-        self._sum = None
-        self._power = power
-
-        self.causal = causal
-        self.eps = eps
-        self.causal_weighting = None
-        
-
+        self.losses = loss_df
+        self.aggregation_method = aggregation_method
+        self.error_func = lambda x: torch.abs(x).pow(power) if power is not None else lambda x: x
+        self.aggregation = torch.mean if aggregation_method == 'mean' else torch.sum
     
-    def num_losses(self):
-        return len(self.point_error(flatten=True))
 
-    # def __len__(self):
-    #     '''
-    #     Returns a 
-    #     '''
-    #     return list( [v for dict_1 in self.error_and_weights.values() for dict_2 in dict_1.values() for v in dict_2.values()] )
+        self.point_error_ = None
+        self.weighted_point_error_ = None
+        self.aggregated_loss_ = None
+    def point_error(self) -> pd.Series:
+        '''
+        Apply the error function/raise the resiudal to a power.
+        '''
+        if self.point_error_ is None:
+            self.point_error_ = self.losses['residual'].apply(self.error_func)
+            self.losses['point_error'] = self.point_error_
+
+        return self.point_error_
     
-    def point_error(self,flatten = False) -> Dict[str,Dict[str,Dict[str,Tuple[torch.Tensor,torch.Tensor]]]]:
+    def weighted_point_error(self) -> pd.Series:
         '''
-        Returns:
-            Dict of Dict of Dict where `(str,(str,(str,Tensor))))`. Each Tensor is the results of a specific function applied to a group output \n 
-            e.g `loss['boundary']['noslip']['u']` contains the point error between the netowrk output u and the actual boundary value
-
-            if flatten is true then returns a list of of every tuple (weight,point_error tensor) in point error
+        Apply Weighting to point error
         '''
-        if self._point_error is None:
-            self._point_error = {loss_type: {group_name : {term_name: point_error for term_name,(point_error,_) in group.items() } for (group_name,group) in (loss_group.items()) } for (loss_type,loss_group) in self.error_and_weights.items() }
-        if flatten:
-            return self.flatten(self._point_error,order = 2)
+        if self.weighted_point_error_ is None:
+            self.weighted_point_error_ = self.losses['weighting']*self.point_error()
+            self.losses['weighted_error'] = self.weighted_point_error_
         
-        return self._point_error
-
-    def weighted_error(self,flatten = False)-> Dict[str,Dict[str,Dict[str,torch.Tensor]]]:
+        return self.weighted_point_error_
+    def aggregated_loss(self) -> pd.Series:
         '''
-        Returns:
-            Dict of Dict of Dict `Dict[str,Dict[str,Dict[str,Tuple[torch.Tensor,torch.Tensor]]]]`. Here we raise all tensor to a power (default 2) and then apply the spatial weighting.
-            If `causal` was set to True, then we apply the causality weighting scheme
-
-            if flatten is true then returns a list of of every tensor after weighting in weighted_error
+        Aggregate each of the losses in each group to get the error for the (group,loss_type) combo
         '''
-        if self._weighted_error is None:
-            self._weighted_error = {loss_type: {group_name : {term_name: weight*(point_error.pow(self._power)) for term_name,(point_error,weight) in group.items() } for (group_name,group) in (loss_group.items()) } for (loss_type,loss_group) in self.error_and_weights.items() }
+        if self.aggregated_loss_ is None:
+            self.aggregated_loss_ = self.weighted_point_error().apply(self.aggregation)
+            self.losses['aggregated_loss'] = self.aggregated_loss_
+        return self.aggregated_loss_
+    def sum(self) -> Tensor : 
+        '''
+        Sum up all aggregate losses to get the total loss
+        '''
+        return sum(self.aggregated_loss())
+    
+    def individual_losses(self):
+        '''
+        Returns all the losses as a list
+        '''
+        return list(self.aggregated_loss())
+
+    def grouped_losses(self, groupby:str):
+        '''
+        Group up the losses based on the string input groupby. Uses `pd.DataFrame().groupby()` to achieve this.
+
+        Valid strings are:
+            - loss_type
+            - group
+            - variable
+        '''
+        if groupby in self.losses.columns:
+            return self.losses.groupby(groupby)['aggregated_loss'].sum()
+        raise ValueError(f'groupby must be one of the following strings: "loss_type", "group" or "variable". Got {groupby} instead')
+    def backward(self):
+        '''
+        Calculate total loss and then Call the Backward method. Syntatic sugar
+        '''
+        self.sum().backward()
+
+    def get_DataFrame(self):
+        return self.losses
+    
+    def __len__(self):
+        return len(self.losses)
+
+    def print_Styled_DataFrame(self):
+        '''
+        Display HTML Dataframe format
+        '''
+        def tensor_shape_formatter(x):
+            if isinstance(x, torch.Tensor):
+                if len(x.shape) == 1 and x.shape[0] == 1:
+                    return f'{float(x):.3E}'
+                else:
+                    return f'{x.shape}, device = {x.device}'  # Convert shape to string for display
+            return x  # Leave other elements unchanged
+
+    # Apply the custom formatting function
+        return self.losses.style.format(tensor_shape_formatter)
+
+    def print_losses(self,epoch,groupby = 'loss_type'):
+        total_loss = self.sum()
+        if groupby in self.losses.columns:
+            losses = self.losses.groupby(groupby)['aggregated_loss'].sum()
+            names = losses.index
             
             
-            if self.causal:
-                self.causal_weighting = Causal_weighting(self._weighted_error,eps = self.eps)
-                self._weighted_error['residual'] = {group_name:{term_name: self.causal_weighting*term_loss for term_name,term_loss in group.items()} for group_name,group in self._weighted_error['residual'].items()}
-
-        if flatten:
-            return self.flatten(self._weighted_error,order = 2)
-
-        return self._weighted_error
-    
-    def MSE(self,flatten = False,names = False) -> Dict[str,Dict[str,Dict[str,torch.Tensor]]]:
-        '''
-        Returns:
-            Dict of Dictionaries where `(str,(str,(str,Tensor))))` here Tensor is a single element. Returns the MSE of each Tensor in weighted_error()
-
-            if flatten is true then returns a list of of every tensor after the averaging has been applied
-        '''
-        if self._MSE is None:
-            self._MSE  ={loss_type : {group_name:{term_name: point_loss.mean() for term_name,point_loss in group.items()} for group_name,group in loss_group.items() } for loss_type,loss_group in self.weighted_error().items() } 
-        
-        if flatten:
-            return self.flatten(self._MSE,order = 2,names=names)
-
-        return self._MSE
-    
-    def group_loss(self,flatten =False,names = False) -> Dict[str,Dict[str,torch.Tensor]]:
-        '''
-        Returns:
-            Dict of Dictionaries where `(str,(str,Tensor)))`. Returns the losses of each group under each loss term.\n
-            e.g in 2D fluid flow `loss['boundary']['no slip']` will be the sum of the loss constraints of both u and v
-
-            if flatten is true then returns a list of of every tensor after summing 
-        '''
-        if self._group_loss is None:
-            group_loss = {loss_type: {group_name:sum(group.values()) for group_name,group in loss_group.items() } for loss_type,loss_group in self.MSE().items() }
-            self._group_loss = group_loss
-        
-        if flatten:
-            return self.flatten(self._group_loss,order = 1,names=names)
-
-        return self._group_loss
-    
-    def individual_loss(self,flatten =False,names = False) -> Dict[str,torch.Tensor]:
-        '''
-        Returns:
-            Dict where `Dict[str,Tensor]` Returns the loss of each different loss type e.g. single value for Residual, Boundary, Initial conditions term
-
-            if flatten is true then returns each individual loss as list form. Equivalent to `list(Loss.individual_loss().values())` 
-            '''
-        if self._individual_loss is None:
-            individual_loss = {loss_type: sum(loss_group.values()) for loss_type,loss_group in self.group_loss().items()}
-            self._individual_loss = individual_loss
-        if flatten:
-            return self.flatten(self._group_loss,order = 0,names=names)
-        
-        return self._individual_loss
-    
-    def sum(self) -> torch.Tensor:
-        '''
-        Returns:
-            The sum of all terms into a single element tensor. Use before calling backwards()
-        '''
-        if self._sum is None:
-            self._sum = sum(self.individual_loss().values())
-        return self._sum
-
-    @staticmethod
-    def flatten(loss:Dict,order,names = False):
-        if order == 0:
-            #Dict[str,tensor]
-            flattened_names = list(loss.keys())
-            flattened_losses =  list(loss.values())
-        if order == 1:
-            #Dict[str,Dict[str,torch.Tensor]]:
-            flattened_names = [f'{group_name}_{v}' for group_name,dict_1 in loss.items() for v in dict_1.keys()]
-            flattened_losses = list([v for dict_1 in loss.values() for v in dict_1.values()])
-        if order == 2:
-            #Dict[str,Dict[str,Dict[str,torch.Tensor]]]
-            flattened_names = list([f'{indi_name}_{group_name}_{v}' for indi_name,dict_1 in loss.items() for group_name,dict_2 in dict_1.items() for v in dict_2.keys()])
-            flattened_losses = list([v for dict_1 in loss.values() for dict_2 in dict_1.values() for v in dict_2.values()])
-
-        if names:
-            return flattened_losses,flattened_names
+        elif isinstance(groupby,None):
+            names = list(self.losses['loss_type'] + '__' + self.losses['group'] + '__' + self.losses['variable'])
+            losses = self.losses['aggregated_loss']
         else:
-            return flattened_losses 
-    def print_losses(self,epoch,weights = None,summary = 'groups'):
-        with torch.no_grad():
-            print(f'Epoch {epoch} :--: Total Loss {float(self.sum()): .3E}  ',end = '  ')
+            raise ValueError(f'groupby must be either None or string and of the following strings: loss_type, group or variable. Got {groupby} instead')
+        loss_strings = '\t'.join([f'{name}: {float(loss):.3E}' for name,loss in zip(names,losses)])
 
-            if summary == 'groups':
-                for name,loss in self.individual_loss().items():
-                    print( f'{name} Loss: {float(loss): .3E}',end = '  ')
-                if self.causal_weighting is not None:
-                    print(f'Causal Weighting Stats: Max: {float(self.causal_weighting.max()):.3E}, Mean: {float(self.causal_weighting.mean()):.3E}, Min: {float(self.causal_weighting.min()):.3E}',end = '   ')
-                print()
-            if summary == 'full':
-                for name,loss in self.MSE(flatten=True):
-                    print( f'{name} Loss: {float(loss): .3E}',end = '  ')
-
-
-    
+        print(f'Epoch {epoch}:- Total Loss {total_loss:.3E}\t {loss_strings}')
 
 class Loss_handler():
     def __init__(self,dataset:PINN_dataset) -> None:
@@ -209,14 +152,21 @@ class Loss_handler():
         self.losses = None
         self.logger = None
 
+        self.df_keys = [
+                'loss_type',
+                'group',
+                'variable',
+                'evaluation',
+                'weighting_function',
+                'weighting',
+                'residual',
+                'point_error',
+                'weighted_error',
+                'aggregated_loss',
+                'custom']
 
-        self.losses: pd.DataFrame = pd.DataFrame(columns = [  'group',
-                                                'loss_type',
-                                                'variable',
-                                                'evaluation',
-                                                'weighting',
-                                                'residual',
-                                                'MSE'])
+
+        self.losses: pd.DataFrame = pd.DataFrame(columns = self.df_keys)
                                                 
 
     def update_dataset(self,dataset:PINN_dataset):
@@ -235,17 +185,6 @@ class Loss_handler():
     def __len__(self):
         return len(self.losses)
 
-    def log_loss(self):
-        losses = self.losses.individual_loss()
-        if self.logger is None:
-            self.logger = {loss_type : [] for loss_type in losses.keys()}
-            self.logger['total'] = []
-        with torch.no_grad():
-            for loss_type,loss in losses.items():
-                self.logger[loss_type].append(float(loss.cpu()))
-
-            self.logger['total'].append(float(self.losses.sum().cpu()))
-
 
     def check_groups(self,dataset:PINN_dataset):
         '''
@@ -254,72 +193,29 @@ class Loss_handler():
 
         pass
 
-    def calculate(self,batched_input:dict[str,PINN_group],batched_output:dict[str,dict[str,Tensor]],power:int = 2)->Loss:
-        # Dict[group,dict[loss_type,tensor]]
-        error_func = lambda x,y: torch.abs(x-y).pow(power)
-
-
+    def calculate(self,batched_input:dict[str,PINN_group],batched_output:dict[str,dict[str,Tensor]],power:int = 2,aggregation_method = 'mean')->Loss:
+        '''
+        Calculate the residuals for each group. Summation and squaring the residuals is done in the loss object itself
+        '''
+        
         for group in batched_input.keys():
-            group_bool = self.losses['group'] == group
+            group_bool = (self.losses['group'] == group) & (self.losses['custom'] == False)
             
             group_output = batched_output[group]
             group_input = batched_input[group].inputs
             
             self.losses.loc[group_bool,'residual'] = self.losses.loc[group_bool,'evaluation'].apply(lambda func: func(group_input,group_output))
-            
-        
-        return self.losses
+            self.losses.loc[group_bool,'weighting'] = self.losses.loc[group_bool,'weighting_function'].apply(lambda func: func(group_input,group_output))
 
-    def calculate_point_error_and_weights(self,group_input:Dict,group_output:Dict,loss_group_first = True) -> Tuple[Dict[str,Dict[str,Dict[str,torch.Tensor]]],Dict[str,Dict[str,Dict[str,torch.Tensor]]]]:
-        '''
-        Create a nested Dict[str,Dict[str,Dict[str,Tensor]]] of both the point error and weights of each points.
+        #All Custom take in the same 
+        custom_funcs = self.losses['custom'] == True
+        self.losses.loc[custom_funcs,'residual'] = self.losses.loc[custom_funcs,'evaluation'].apply(lambda func: func(batched_input,batched_output))
 
-        Returns a tuple pair of Dict[str,Dict[str,Dict[str,Tensor]]] with the first element being the point errors and second element/dict being the point weights for each term
-        '''
-        point_losses = {}
-
-        for (loss_type,loss_group) in self.loss_groups.items():
-                point_losses[loss_type] = {}
-                for (group_name,group) in loss_group.items():
-                    point_losses[loss_type][group_name] = {}
-                    point_loss = point_losses[loss_type][group_name]
-                    for loss_name,(loss_func,weight_func) in group.items():
-                        point_loss[loss_name] = (loss_func(group_input,group_output),weight_func(group_input))
-        
-        return point_losses
-    
-
-    def add_custom_function(self,group,func_dict,weighting = 1):
-        '''
-        Add a custom function. 
-        Inputs:
-        - group: str - the name to place all custom functions in. This group can be arbitary. This is useful to group custom functions together. For example grouping a specific set of function under 'mass flow'
-        - func_dict: dictionary: a Dictionary containing the function name and a tuple (func,kwargs) to put in group_name. The dictionary syntax of (key,value) --> (func_name,(function,kwargs))
+        return Loss(self.losses,aggregation_method,power)
 
 
-        The function should take in two inputs f(x_dict,group_dict): 
-        x_dic a dictionary where the each group contains a batch of input points to the network. For example x_dic['spam'] will return the the tensor of size (N,D) (e.g. x,y,z) from the group 'spam'. 
 
-        group_dic a dictionary of dictionaries where the first set of keys return the group and the second set of keys return the output variable. For example group_dic['foo']['u'] will return the 'u' variables from the group foo.
-
-        Note that if the loss handler is called or the function self.caluclate is called, the result will then be raised to a power (defaut 2) and then averaged.
-
-        '''
-        def f(kwargs):
-            def inner_f(x,g):
-                return func(x,g,**kwargs)
-            return inner_f
-        
-        custom_dic = self.group_checker('custom',group)
-        if not isinstance(weighting,dict):
-            weighting = {func_name: weighting for func_name in func_dict.keys()}
-
-        for weight,(func_name,func_items) in zip(weighting.values(),func_dict.items()):
-            (func,kwargs) = func_items if len(func_items) == 2 else (func_items[0],{})
-            custom_dic[group][func_name] = (f(kwargs),self.make_weighting_func(weight,group))
-
-
-    def set_terms(self,loss_type,group,var_dict: dict[str,Union[float,Callable]], weighting: Union[float,dict,Callable]):
+    def set_terms(self,loss_type,group,var_dict: dict[str,Union[float,Callable]], weighting: Union[float,dict,Callable],custom:bool = False):
         # The output of DE_Getter is a dictionary [group][vars]
 
         #Get all the losses associated with the loss_type (e.g. boundary or IC) and group
@@ -336,28 +232,30 @@ class Loss_handler():
             if var_name in group_loss_type_df['variable']:
                 raise ValueError(f'variable name {var_name} already exists in group {group} as a {loss_type} term')
             
-            weight_func = lambda group_input : weighting if not callable(weight_func) else weighting 
-                
-            loss = pd.DataFrame([{
+            weight_func = lambda group_input,group_output : weighting if not callable(weight_func) else weighting 
+            
+
+            loss_dict = dict.fromkeys(self.df_keys,None)
+            loss_dict.update({
                 'loss_type': loss_type,
                 'group': group,
                 'variable': var_name,
                 'evaluation': evaluation_func,
-                'weighting': weight_func,
-                'residual': None,
-                'MSE': None
-            }])
+                'weighting_function': weight_func,
+                'custom': custom
+            })
+            
+            loss = pd.DataFrame([loss_dict])
 
-            self.losses = pd.concat([self.losses,loss])
+            self.losses = pd.concat([self.losses,loss],ignore_index= True)
     @staticmethod
     def create_residual_from_rhs(var_name,rhs):
         '''
         Given a right hand side (rhs), create a residual function such that var_name-rhs = 0
         '''
         
-        rhs_func = lambda **kwargs: rhs if not callable(rhs) else rhs
-        rhs_func = DE_func(rhs_func)
-        
+        rhs_func = DE_func(lambda **kwargs: rhs) if not callable(rhs) else rhs
+        # rhs_func = DE_func(rhs_func)
         #Residual Functions is group_dict[var_name] - rhs(x)
         return lambda group_input,group_output: group_output[var_name] - rhs_func(group_input,group_output)
 
@@ -374,67 +272,41 @@ class Loss_handler():
         self.set_terms('residual',group,residuals,weighting)
         
 
-    # def add_boundary(self,group,bound_dict,weighting:Union[float,Callable,Dict] = 1):
-        
-    #     self.set_terms('boundary','data_loss_func',group,bound_dict,weighting)
-    
-    # def add_data_constraint(self,group:str,data_keys:List[str] = None,weighting = 1):
-    #     '''
-    #     Add a data driven contstraint to a PINN. This is used when we have data is strictly tied to the input data i.e. data from a sensor over time. 
-    #     '''
-    #     # self.set_terms('data_driven','data_driven',group,data_keys,weighting)
+    def add_periodic(self,group_1:str,group_2:str,variable:str):
+        '''
+        Add Periodic Conditions
 
-    #     if self.groups[group].targets is None:
-    #         raise ValueError(f'The group {group} does not have any target data attributed to it')
+        As this counts as a custom function (as it requires data from different groups), weighting point wise cannot be defined interms of input and output.
 
-    #     if data_keys is None:
-    #         data_keys = self.groups[group].targets.keys()
+        '''
 
-    #     loss_group = self.group_checker('data driven',group)
-    #     if not isinstance(weighting,dict):
-    #         weighting = {var_comp: weighting for var_comp in data_keys}
-        
+        def periodic(batched_input,batched_output):
+            return batched_output[group_1][variable] - batched_output[group_2][variable]
 
-    #     for key,weight in zip(data_keys,weighting.values()):
-    #         loss_group[group][key] = (self.data_driven_func(group,key), self.make_weighting_func(weight,group))
-    
-    # def add_residual(self,group,res_dict:dict,weighting = 1):
-    #     self.set_terms('residual','residual_loss_func',group,res_dict,weighting)
-    
-    # def add_initial_condition(self,group:str,ic_dict:dict,weighting = 1):
-    #     self.set_terms('initial condition','data_loss_func',group,ic_dict,weighting)
-        
-    # def add_periodic(self,group_1:str,group_2:str,var:str,weighting = 1):
-    #     '''
-    #     We treat group_1 as the main group and group_2 as the secondary so this is stored in the group_1
-
-    #     The key structure is [group_1][group_2_var]
-    #     '''
-    #     loss_group = self.group_checker('periodic',group_1)
-    #     assert group_2 in self.groups, "The group {group} does not exist in the loss handler. Please check your spelling"
-
-    #     if isinstance(var,str):
-    #         loss_group[group_1][f'{group_2}_{var}'] = (self.periodic_loss_func(group_1,group_2,var),self.make_weighting_func(weighting,group_1))
-            
-    #     else:
-    #         raise TypeError(f'varaible var needs to be type string Instead found type f{type(var)}')
-
+        periodic_dict = {variable: periodic}    
+        self.set_terms('periodic',group_1,periodic_dict,weighting=1.,custom=True)
     
 
-    def group_checker(self,loss_type,group) -> dict:
-            '''
-            Check if loss_type exists and if group in loss type exists. Otherwise add them
-            '''
-            if loss_type not in self.loss_groups.keys():
-                self.loss_groups[loss_type] = {}
-            if loss_type != 'custom':
-                assert group in self.group_names, f"The group {group} does not exist in the loss handler. Please check your spelling"
-            loss_group = self.loss_groups[loss_type]
-            if group not in loss_group.keys():
-                loss_group[group] = {}
-            return loss_group
+    def add_custom_function(self,loss_type:str,group:str,func_dict:dict[str,Callable]):
+        '''
+        Add a custom function. 
+        Inputs:
+        - group: str - the name to place all custom functions in. This group can be arbitary. This is useful to group custom functions together. For example grouping a specific set of function under 'mass flow'
+        - func_dict: dictionary: a Dictionary containing the function name and a tuple (func,kwargs) to put in group_name. The dictionary syntax of (key,value) --> (func_name,(function,kwargs))
 
+        Note that weighing is not provided for custom functions. The weighting must be defined within the function itself.
 
+        The function should take in two inputs f(batched_input,batched_output): 
+        batched_input a dictionary where the each group contains a batch of input points to the network. For example `batched_input['spam']` will return a dictionary with keys `('inputs',*coords)` where inputs contains the full NxD tensor
+        of the input and *coords are strings representing the input variable and slices of the full Tensor. e.g. 'x' would be equivalent to the slice of `batched_input['spam']['inputs'][:,0]`
+
+        group_dic a dictionary of dictionaries where the first set of keys return the group and the second set of keys return the output variable. For example group_dic['foo']['u'] will return the 'u' variables from the group foo.
+
+        Note that if the loss handler is called or the function self.caluclate is called, the result will then be raised to a power (defaut 2) and then averaged.
+
+        '''
+        custom = True
+        self.set_terms(loss_type,group,func_dict,weighting=1.,custom=custom)
 
     @staticmethod
     def make_weighting_func(weighting,group_name):

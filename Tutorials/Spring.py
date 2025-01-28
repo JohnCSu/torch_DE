@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch_DE.continuous import DE_Getter
 from torch_DE.utils.data import PINN_dataset,PINN_Dataloader
-from torch_DE.utils import Loss_handler
+from torch_DE.utils import Loss_handler,DE_func
 from matplotlib import pyplot as plt
 '''
 Solving the Spring Equation 
@@ -20,13 +20,13 @@ that help train PINNs.
 t = torch.linspace(0,2*torch.pi,10_000).unsqueeze(dim =-1)
 t0 = torch.tensor([0.]).unsqueeze(dim=-1)
 
-dataset = PINN_dataset()
+dataset = PINN_dataset(['t'])
 dataset.add_group('collocation_points',t,batch_size=1000,shuffle=True)
 dataset.add_group('initial condition',t0,batch_size= 1)
 DL = PINN_Dataloader(dataset)
 
 #Losses
-spring_eq = lambda u,u_tt,**kwargs: u_tt+u
+spring_eq = DE_func(lambda u,u_tt,**kwargs: u_tt+u)
 losses = Loss_handler(dataset)
 losses.add_initial_condition('initial condition',{'u': 0., 'u_t': 1.})
 losses.add_residual('collocation_points',{'spring_eq':spring_eq})

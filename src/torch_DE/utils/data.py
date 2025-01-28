@@ -83,10 +83,10 @@ class PINN_group():
         self.inputs = add_time(time_type,*tensors,time_interval =time_interval,point=point,dim=dim)
         
 
-
-    def __getitem__(self,idx):
-        return self.subgroup(idx)
-
+    # def __getitem__(self,idx):
+    #     return self.subgroup(idx)
+    def __getitem__(self,key):
+        return self.inputs[key]
 
 
 class PINN_dict(Variable_dict):
