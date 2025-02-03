@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import torch
 from numpy.random import rand
 from torch_DE.utils import RegularGridInterpolator
+from torch_DE.utils import add_time
 import geopandas as gdp
 
 def Circle(center:tuple,r:float,num_points = 1024):
@@ -198,19 +199,26 @@ class Domain2D():
         assert line_type == 'curve' or line_type == 'linear', 'line_type can only be strings curve or linear'
 
         self.boundary_groups[key] = (self.operations[shapeID].boundary,line_type)
-
     
-    def generate_points_from_boundary(self,boundary,points_per_line = 100,random = False):
+    def generate_points_from_boundary(self,boundary,points_per_line = 100,random = False,time_interval = None,time_sampling = 'random interval'):
+            
             exterior,exterior_type = self.boundary_groups[boundary]
             if exterior_type == 'curve':
-                return torch.tensor(exterior.coords)
+                points = torch.tensor(exterior.coords) 
             elif exterior_type == 'linear':
                 num_lines = len(exterior.coords) - 1
-                return self.generate_points_from_line(exterior,points_per_line*num_lines,random = random)
+                points = self.generate_points_from_line(exterior,points_per_line*num_lines,random = random)
+            else:
+                raise ValueError(f'got exterior type = {exterior_type}. Should be linear or curve')
+
+            if time_interval is not None:
+                points = add_time(time_sampling,points,time_interval= time_interval)
+            return points
 
 
-    def generate_boundary_points(self,num_points = 100, random = False):
-        return   {name:self.generate_points_from_boundary(name,num_points,random) for name in self.boundary_groups.keys()} 
+
+    def generate_boundary_points(self,num_points = 100, random = False,time_interval = None,time_sampling = 'random interval'):
+        return   {name:self.generate_points_from_boundary(name,num_points,random,time_interval,time_sampling) for name in self.boundary_groups.keys()} 
 
     
     def clear_mesh(self):
@@ -219,7 +227,7 @@ class Domain2D():
 
     
 
-    def generate_points(self,n:int,shapeID:str = None,func:Callable = None,output_type:str = 'torch',seed:int = None,**kwargs):
+    def generate_points(self,n:int,shapeID:str = None,func:Callable = None,seed:int = None,time_interval = None, time_sampling = 'random interval',**kwargs) -> torch.Tensor:
         '''
         sample points from domain. Default triangulates the domain and then samples from the
             triangulated domain or specified Group Shape.
@@ -244,14 +252,16 @@ class Domain2D():
                 self.points,self.triangles=points,triangles 
             else:
                 points,triangles = self.points,self.triangles
-            out = generate_points_from_triangles(points,triangles,n)
+            points = generate_points_from_triangles(points,triangles,n)
         else:
-            out =  func(n,shape,**kwargs)
+            points =  func(n,shape,**kwargs)
 
-        if output_type == 'numpy':
-            return out
-        elif output_type == 'torch':
-            return torch.tensor(out).to(torch.float32)
+        points = torch.tensor(points).to(torch.float32)
+        if time_interval is not None:
+            points = add_time(time_sampling,points,time_interval= time_interval)
+
+        return points
+        
 
 
     @staticmethod

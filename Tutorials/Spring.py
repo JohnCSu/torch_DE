@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 from torch_DE.continuous import DE_Getter
 from torch_DE.utils.data import PINN_dataset,PINN_Dataloader
-from torch_DE.utils import Loss_handler,DE_func
+from torch_DE.utils import Loss_handler
+from torch_DE.equations import DE_func
 from matplotlib import pyplot as plt
 '''
 Solving the Spring Equation 

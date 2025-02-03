@@ -6,31 +6,13 @@ import torch.utils
 import torch.utils.data
 from torch_DE.utils.loss_weighting import GradNorm,Causal_weighting
 from torch_DE.utils.data import PINN_dict,PINN_dataset,PINN_group
-
+from torch_DE.equations.de_func import DE_func
 import pandas as pd
 
 
 import inspect
 from functools import wraps
 from torch import Tensor,TensorType
-
-def DE_func(func):
-    '''
-    Decorator to turn your function into form suitable for troch DE. This is primarily for functions defined explicitly using their input varible names
-    e.g. Poisson2D(u_xx,u_zz,x,y,**kwargs). Important note that **kwargs keyword variable MUST be defined otherwise an error is raised. The kwargs will absorb any
-    unused variables (e.g. u_x , u_z for the above equation)
-
-    Otherwise functions must be defined using dictionaries as inputs in the form f(x,y) where  x is the dictionary containing the corresponding input data 
-    and y is a dictionary containing output and derivatives of the network
-    '''
-    sig = inspect.signature(func)
-    assert inspect.Parameter.VAR_KEYWORD in [param.kind for param in sig.parameters.values()] , 'To use residual decorator, you need to have the **kwargs declared in your function input e.g foo(x,y,**kwargs)'
-    @wraps(func)
-    def DE_func_wrapper(network_input:dict[str,TensorType],network_output:dict[str,TensorType]):
-        return func(**network_input,**network_output )
-    DE_func_wrapper.is_decorated = True
-    return DE_func_wrapper
-
 
 
 class Loss():
@@ -47,6 +29,7 @@ class Loss():
         self.point_error_ = None
         self.weighted_point_error_ = None
         self.aggregated_loss_ = None
+        
     def point_error(self) -> pd.Series:
         '''
         Apply the error function/raise the resiudal to a power.
@@ -82,11 +65,11 @@ class Loss():
     
     def individual_losses(self):
         '''
-        Returns all the losses as a list
+        Returns all the losses as a Tensor
         '''
-        return list(self.aggregated_loss())
+        return torch.stack(list(self.aggregated_loss()))
 
-    def grouped_losses(self, groupby:str):
+    def grouped_losses(self, groupby:str) -> pd.Series:
         '''
         Group up the losses based on the string input groupby. Uses `pd.DataFrame().groupby()` to achieve this.
 
@@ -95,6 +78,7 @@ class Loss():
             - group
             - variable
         '''
+        self.aggregated_loss()
         if groupby in self.losses.columns:
             return self.losses.groupby(groupby)['aggregated_loss'].sum()
         raise ValueError(f'groupby must be one of the following strings: "loss_type", "group" or "variable". Got {groupby} instead')
@@ -141,6 +125,11 @@ class Loss():
 
         print(f'Epoch {epoch}:- Total Loss {total_loss:.3E}\t {loss_strings}')
 
+
+
+
+
+
 class Loss_handler():
     def __init__(self,dataset:PINN_dataset) -> None:
         '''
@@ -163,7 +152,9 @@ class Loss_handler():
                 'point_error',
                 'weighted_error',
                 'aggregated_loss',
-                'custom']
+                'custom',
+                'group_input',
+                'group_output']
 
 
         self.losses: pd.DataFrame = pd.DataFrame(columns = self.df_keys)
@@ -178,7 +169,7 @@ class Loss_handler():
 
 
 
-    def __call__(self,group_input:Dict,group_output:Dict,**kwargs):
+    def __call__(self,group_input:Dict,group_output:Dict,**kwargs) -> Loss:
         return self.calculate(group_input,group_output,**kwargs)
 
     
@@ -202,7 +193,7 @@ class Loss_handler():
             group_bool = (self.losses['group'] == group) & (self.losses['custom'] == False)
             
             group_output = batched_output[group]
-            group_input = batched_input[group].inputs
+            group_input = batched_input[group]
             
             self.losses.loc[group_bool,'residual'] = self.losses.loc[group_bool,'evaluation'].apply(lambda func: func(group_input,group_output))
             self.losses.loc[group_bool,'weighting'] = self.losses.loc[group_bool,'weighting_function'].apply(lambda func: func(group_input,group_output))
@@ -210,6 +201,7 @@ class Loss_handler():
         #All Custom take in the same 
         custom_funcs = self.losses['custom'] == True
         self.losses.loc[custom_funcs,'residual'] = self.losses.loc[custom_funcs,'evaluation'].apply(lambda func: func(batched_input,batched_output))
+        self.losses.loc[custom_funcs,'weighting'] = 1.
 
         return Loss(self.losses,aggregation_method,power)
 
@@ -220,19 +212,19 @@ class Loss_handler():
 
         #Get all the losses associated with the loss_type (e.g. boundary or IC) and group
 
-
+        assert group in self.dataset.group_names()
         group_loss_type_df = self.losses[(self.losses['group'] == group)&(self.losses['loss_type'] == loss_type)]
         #We want to match up the weighting to the var_dict
         if not isinstance(weighting,dict):
             weighting = {var_comp: weighting for var_comp in var_dict.keys()}  
     
-        for (var_name,evaluation_func),(weighting) in zip(var_dict.items(),weighting.values()):
+        for (var_name,evaluation_func),(weighting_value) in zip(var_dict.items(),weighting.values()):
 
             #First Check that varible not already added in loss type for group
             if var_name in group_loss_type_df['variable']:
                 raise ValueError(f'variable name {var_name} already exists in group {group} as a {loss_type} term')
             
-            weight_func = lambda group_input,group_output : weighting if not callable(weight_func) else weighting 
+            weight_func = (lambda group_input,group_output: weighting_value) if not callable(weighting_value) else weighting_value 
             
 
             loss_dict = dict.fromkeys(self.df_keys,None)
@@ -253,11 +245,10 @@ class Loss_handler():
         '''
         Given a right hand side (rhs), create a residual function such that var_name-rhs = 0
         '''
-        
         rhs_func = DE_func(lambda **kwargs: rhs) if not callable(rhs) else rhs
-        # rhs_func = DE_func(rhs_func)
-        #Residual Functions is group_dict[var_name] - rhs(x)
         return lambda group_input,group_output: group_output[var_name] - rhs_func(group_input,group_output)
+
+
 
     def add_boundary(self,group,bound_dict:dict[str,Union[float,Callable]],weighting:Union[float,Callable,Dict] = 1):
         bound_dict = {var_name:self.create_residual_from_rhs(var_name,rhs) for var_name,rhs in bound_dict.items()}
@@ -270,7 +261,20 @@ class Loss_handler():
         
     def add_residual(self,group,residuals:dict[str,Callable],weighting = 1): 
         self.set_terms('residual',group,residuals,weighting)
+    
+
+    def add_data_constraint(self,loss_type,group,data_vars: list[str],weighting = 1.):
         
+        def data_driven_func(var_name):
+            def data_driven_func_wrapper(group_input:PINN_group,group_output:PINN_dict):
+                return group_output[var_name] - group_input.batchables[var_name]
+            return data_driven_func_wrapper
+        
+        
+        data_dict = {var_name: data_driven_func(var_name) for var_name in data_vars}
+
+        
+        self.set_terms(loss_type,group,data_dict,weighting)
 
     def add_periodic(self,group_1:str,group_2:str,variable:str):
         '''
@@ -308,49 +312,4 @@ class Loss_handler():
         custom = True
         self.set_terms(loss_type,group,func_dict,weighting=1.,custom=custom)
 
-    @staticmethod
-    def make_weighting_func(weighting,group_name):
-        if callable(weighting): 
-            return lambda group_input : weighting(group_input[group_name].inputs)
-        else:
-            return lambda group_input : weighting
-        
-
-    def periodic_loss_func(self,group_1,group_2,var):
-        
-        def periodic_loss(group_input,output_dict):
-            return output_dict[group_1][var] - output_dict[group_2][var]
-        
-        return periodic_loss
-
-
-    def data_driven_func(self,group,data_var):
-        return lambda group_input,output_dict: (output_dict[group][data_var] - group_input[group].targets[data_var]) 
-
-    def data_loss_func(self,group:str,var_comp:str,value_func):
-        
-        value_func2 =  (lambda x : value_func) if not callable(value_func) else value_func
-        
-        def data_loss_constructor(group_input,output_dict):
-                '''
-                u is a dictionary containing all the ouputs and derivatives of a
-                '''
-                return ((output_dict[group][var_comp] - value_func2(group_input[group].inputs)))
-            
-
-        return data_loss_constructor
-
-    def residual_loss_func(self,group,res_name,res_func):
-        '''
-        Create a residual loss function
-        res_func: function that takes in derivatives and outputs and potentially inputs. Should be of the form R(x,u,u_t,..., **kwargs) Must have the kwargs term
-                Note that x here is an overall variable for spatial input. If you need to seperate the spatial input into individual components, e.g in to x,y,z
-                Do so inside the function
-        '''
-        def residual_loss_constructor(group_input,output_dict):
-                '''
-                u is a dictionary containing all the ouputs and derivatives of a
-                '''
-                return res_func( x = group_input[group],**output_dict[group])
-
-        return residual_loss_constructor
+    

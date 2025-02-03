@@ -2,7 +2,7 @@ import inspect
 def get_derivatives(input_vars,output_vars,*equations,merge = True) -> tuple:
     remove_list = set(['kwargs'] + list(input_vars) + list(output_vars))
 
-    derivatives = {}
+    derivatives = []
     for equation in equations:
         var_names = set(inspect.signature(equation).parameters.keys())
         to_remove = set()
@@ -26,11 +26,11 @@ def get_derivatives(input_vars,output_vars,*equations,merge = True) -> tuple:
         
         var_names = var_names.difference(to_remove)
         
-        derivatives[equation.__name__] = var_names
+        derivatives.append(var_names)
 
     if merge:
         derivs = set()
-        for dydx in derivatives.values():
+        for dydx in derivatives:
             derivs.update(dydx)
         return tuple(derivs)
     

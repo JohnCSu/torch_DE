@@ -1,4 +1,4 @@
-from torch_DE.equations import get_NavierStokes,get_derivatives
+from torch_DE.equations import get_NavierStokes,get_derivatives,DE_func
 from torch_DE.geometry.shapes import *
 from torch_DE.continuous import DE_Getter
 from torch_DE.continuous.Networks import MLP,Wang_Net,Fourier_Net
@@ -58,12 +58,12 @@ domain = Domain2D(base = domain)
 hole = Circle(circle_center,r = circle_radius,num_points= 512)
 domain.remove(hole,names= ['Cylinder'])
 
-sampled_points = domain.generate_points(5_000_00)
+sampled_points = domain.generate_points(5_000_00,time_interval=t_int)
 
 domain.add_boundary_group('Cylinder','curve','Cyl_No_Slip')
 
 num_points = 10_000
-boundary_points = domain.generate_boundary_points(num_points=num_points,random = False)
+boundary_points = domain.generate_boundary_points(num_points=num_points,random = False,time_interval=t_int)
 
 inlet = boundary_points['exterior_edge_0']
 outlet = boundary_points['exterior_edge_2']
@@ -99,17 +99,6 @@ u0,v0,x_IC = get_dataset()
 u0,v0,x_IC = u0/U_star,v0/U_star,x_IC/L_star
 x_IC = add_time('single point',x_IC,point = 0.0)
 
-# Dataset and Loader
-dataset = PINN_dataset()
-dataset.add_group('inlet',inlet,batch_size=1000,shuffle = True)
-dataset.add_group('no slip',no_slip,batch_size=1000,shuffle = True)
-dataset.add_group('outlet',outlet,batch_size=1000,shuffle = True)
-dataset.add_group('collocation points',sampled_points,batch_size=5000,shuffle=True)
-dataset.add_time('random interval',[0,1])
-# We add IC after setting the time for the other groups
-dataset.add_group('initial condition',x_IC,{'u':u0,'v':v0},batch_size=1000,shuffle= True)
-
-DL = PINN_Dataloader(dataset)
 
 #Losses and Equations
 Re = 100
@@ -117,8 +106,20 @@ input_vars,output_vars,derivatives,equations = get_NavierStokes(dims = 2,steady_
 (NS_x,NS_y,incomp) = list(equations.values())
 
 U = 1.5
-u_inlet_func = lambda x : 4*U*x[:,1]*(ymax-x[:,1])/(ymax**2)
-outlet_func = lambda x_dict,out_dict: 1/Re*out_dict['outlet']['u_x'] - out_dict['outlet']['p']
+u_inlet_func = DE_func(lambda y,**kwargs : 4*U*y*(ymax-y)/(ymax**2))
+outlet_func = DE_func(lambda u_x,p,**kwargs: 1/Re*u_x - p)
+
+# Dataset and Loader
+dataset = PINN_dataset(input_vars)
+dataset.add_group('inlet',inlet,batch_size=1000,shuffle = True)
+dataset.add_group('no slip',no_slip,batch_size=1000,shuffle = True)
+dataset.add_group('outlet',outlet,batch_size=1000,shuffle = True)
+dataset.add_group('collocation points',sampled_points,batch_size=5000,shuffle=True)
+# dataset.add_time('random interval',[0,1])
+# We add IC after setting the time for the other groups
+dataset.add_group('initial condition',x_IC,{'u':u0,'v':v0},batch_size=1000,shuffle= True)
+
+DL = PINN_Dataloader(dataset)
 
 #Losses
 losses = Loss_handler(dataset)
@@ -126,7 +127,7 @@ losses.add_boundary('inlet',{'u':u_inlet_func,
                             'v':0})
 
 losses.add_boundary('outlet',{'v_x':0})
-losses.add_custom_function('outlet',{'outlet':(outlet_func,)})
+losses.add_boundary('outlet',{'u_x':outlet_func})
 
 losses.add_boundary('no slip',{'u':0,
                                 'v':0 })
@@ -135,7 +136,7 @@ losses.add_residual('collocation points',{'stokes_x':NS_x,
                                         'stokes_y':NS_y, 
                                         'incomp':incomp },weighting=1)
 
-losses.add_data_constraint('initial condition',['u','v'])
+losses.add_data_constraint('initial condition','initial condition',['u','v'])
 
 #Network, Optimizer and LR SETUP
 
@@ -165,22 +166,25 @@ for tp in range(0,10):
     PINN.set_deriv_method('FD')
 
     # Training Loop
-    weights = torch.ones(len(losses),dtype = torch.float32)
+    weights = torch.ones(len(losses),dtype = torch.float32,device = 'cuda')
     print(f'Num Batches {len(DL)}')
     for epoch in range(1,MAX_EPOCHS+1):
+        weight_flag = True
         for x in DL:
             x = x.to(device = 'cuda')
             #Calculate Derivatives
             out = PINN.calculate(x)
             #Get Losses
             loss = losses(x,out)
-            loss_sum = sum([w*l for w,l in zip(weights,loss.MSE(flatten= True))])
+            
+            loss_sum = sum(loss.individual_losses() * weights)
 
-            if (epoch % 5) == 0 and (epoch > 0):
-                weights = GradNorm(net,weights,*loss.MSE(flatten= True))
-                
+            if (epoch % 10) == 0 and epoch > 0 and weight_flag is True:
+                weights = GradNorm(net,weights,*loss.individual_losses())
+                weight_flag = False
+                print(weights)
+
             loss_sum.backward()
-
             optimizer.step()
             LR_sch.step()
 

@@ -44,7 +44,7 @@ def GradNorm(net:torch.nn.Module,global_weights:torch.Tensor,*losses:torch.Tenso
         grad_mags = [torch.sqrt( sum( (torch.sum(g.pow(2))  for g in grad if g is not None))) for grad in grads]
         grad_sum = sum(grad_mags)
 
-        new_weights =torch.tensor([ min(grad_sum/(grad_mag) if grad_mag > eps else global_weight ,max_weight) for grad_mag,global_weight in zip(grad_mags,global_weights)])
+        new_weights =torch.tensor([ min(grad_sum/(grad_mag) if grad_mag > eps else global_weight ,max_weight) for grad_mag,global_weight in zip(grad_mags,global_weights)],device = global_weights.device)
         
         #Just to be sure make everything a tensor (we dont call this often so it should be fine)
         return alpha*global_weights + (1-alpha)*new_weights

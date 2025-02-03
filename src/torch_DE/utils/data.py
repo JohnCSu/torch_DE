@@ -8,87 +8,7 @@ import inspect
 from torch_DE.utils.time import add_time
 from torch_DE.symbols import Variable_dict
 from torch import Tensor
-
-class PINN_group():
-    def __init__(self,name:str,inputs:Tensor,batch_size:int,targets:Union[torch.Tensor,dict],input_vars:list[str],*,shuffle = False):
-        '''
-        Container for data for a defined grouped
-
-        inputs:
-            - name : str name of group
-            - inputs: Tensor: full tensor of group of size NxD where N is the number of input points and D is the dimensional input of the network
-            - batch_size: int batch size. must be smaller than N
-            - targets: Tensor | dict: target data that the output of the network with respect to this specific group must match.
-            - variables: list[str] | None: variable names of each input dimension. should be the same size as D 
-
-        '''
-        self.name:str = name
-        self.batch_size:int = batch_size
-        self.N,self.D = inputs.shape
-
-        self.input_vars:list[str] = input_vars
-        self.inputs:dict = {'input': inputs}
-        self.inputs.update({input_var:inputs[:,i] for i,input_var in enumerate(input_vars)})
-        self.has_multiple_inputs = False
-        self.checks()
-
-        if isinstance(targets,dict):
-            self.targets = PINN_dict(targets)
-        else:
-            self.targets = PINN_dict({'target': targets}) if isinstance(targets,torch.Tensor) else None
-        
-        self.shuffle = shuffle 
-
-        
-
-    def __len__(self):
-        return int(self.N)
-
-    def checks(self):
-        assert len(self.inputs['input'].shape) == 2
-        assert self.batch_size <= self.__len__()
-        assert len(self.input_vars) == self.D
-
-
-    def to(self,*args,**kwargs):
-        self.inputs = {key:x.to(*args,**kwargs) for key,x in self.inputs.items()}
-        if self.targets is not None:
-            self.targets = {key:x.to(*args,**kwargs) for key,x in self.targets.items()}
-        return self
-    
-
-    def subgroup(self,idx):
-        '''
-        Given an list of indices, return a smaller PINN group containing data only on those indices. This is used for batching each group
-        '''
-        inputs = self.inputs['input'][idx]
-        
-        if self.has_multiple_inputs:
-            inputs = tuple(x[idx] for x in self.inputs)
-        
-        targets = None
-        if self.targets is not None:
-            targets = {target: target_tensor[idx] for target,target_tensor in self.targets.items()}
-
-        return PINN_group(self.name,inputs,self.batch_size,targets,input_vars=self.input_vars,shuffle=self.shuffle)
-
-
-    def add_time(self,time_type,time_interval:Union[list,tuple] = None,point:float = None,dim:int = -1):
-        if self.has_multiple_inputs:
-            for tensor in self.inputs[1:]:
-                assert tensor.shape == self.inputs[0].shape, 'tensors in each input need to be of same shape. You may need to manually assign time to each individual inputs'
-            tensors = self.inputs
-        else:
-            tensors = [self.inputs]
-        self.inputs = add_time(time_type,*tensors,time_interval =time_interval,point=point,dim=dim)
-        
-
-    # def __getitem__(self,idx):
-    #     return self.subgroup(idx)
-    def __getitem__(self,key):
-        return self.inputs[key]
-
-
+from tensordict import TensorDict
 class PINN_dict(Variable_dict):
     '''
     Basically a regular dict but with some extra functionality e.g .to() to help cast tensors to devices as well as keys using `sympy.Symbol()` see `torch_DE.symbols.Variable_dict` for moore info
@@ -101,6 +21,97 @@ class PINN_dict(Variable_dict):
             self[key] = self[key].to(*args,**kwargs)
         return self
 
+
+class PINN_group():
+    def __init__(self,name:str,inputs:Tensor,batch_size:int,input_vars:list[str],batchable_kwargs: dict | None = None,unbatched_kwargs:dict | None=None,*,shuffle = False):
+        '''
+        Container for data for a defined grouped
+
+        inputs:
+            - name : str name of group
+            - inputs: Tensor: full tensor of group of size NxD where N is the number of input points and D is the dimensional input of the network
+            - batch_size: int batch size. must be smaller than N
+            - targets: Tensor | dict: target data that the output of the network with respect to this specific group must match.
+            - variables: list[str] | None: variable names of each input dimension. should be the same size as D 
+            
+        '''
+        self.name:str = name
+        self.batch_size:int = batch_size
+        self.N,self.D = inputs.shape
+        
+ 
+        self.inputs = TensorDict({'input':inputs},batch_size=self.N)
+        self.inputs.update({input_var:inputs[:,i] for i,input_var in enumerate(input_vars)})
+
+
+        if batchable_kwargs is not None:
+            self.is_dict_OR_none(batchable_kwargs)
+            self.shared_keys_check(self.inputs,batchable_kwargs)
+            self.batchable_kwargs = TensorDict(batchable_kwargs,batch_size=self.N)
+        else:
+            self.batchable_kwargs = TensorDict(batch_size=self.N)
+        
+        self.batchables = TensorDict({**self.inputs,**self.batchable_kwargs},batch_size=self.N,lock=True)
+        self.unbatchables = unbatched_kwargs if isinstance(unbatched_kwargs,dict) else {}
+
+        self.input_vars:list[str] = input_vars
+        self.batchables_vars:list[str] = list(self.batchable_kwargs.keys())
+        self.checks()
+
+        self.shuffle = shuffle 
+    
+    
+    
+    @staticmethod
+    def same_size_values(dict:dict,size:int):
+        for x in dict.values():
+            assert len(x) == size , 'All values for batchable_kwargs must have the same length in the batch dimension' 
+
+
+    @staticmethod
+    def shared_keys_check(dict1,dict2):
+        shared_keys = set(dict1.keys()) & set(dict2.keys())
+        if shared_keys:
+            raise ValueError(f"Shared keys detected: {shared_keys}")
+
+
+    def __len__(self):
+        return int(self.N)
+    
+    @staticmethod
+    def is_dict_OR_none(dic):
+        if not isinstance(dic,(dict,TensorDict)) and dic is not None:
+            raise TypeError(f'unbatched_kwargs can only be of type dict,Tensordict or None. Got {type(dic)} instead')
+
+    def checks(self):
+        assert len(self.inputs['input'].shape) == 2
+        assert self.batch_size <= self.__len__()
+        assert len(self.input_vars) == self.D
+        
+
+
+    def to(self,*args,**kwargs):
+        for key,x in self.unbatchables.items():
+            if hasattr(x,'to'):
+                self.unbatchables[key] = x.to(*args,**kwargs)
+        
+        self.batchables = self.batchables.to(*args,**kwargs)
+        self.batchable_kwargs = self.batchables.select(*self.batchables_vars)
+        self.inputs = self.batchables.select(*self.inputs.keys())
+        return self
+    
+
+    def subgroup(self,idx):
+        '''
+        Given an list of indices, return a smaller PINN group containing data only on those indices. This is used for batching each group
+        '''
+        inputs = self.batchables['input'][idx]
+        
+        batchable_kwargs = self.batchable_kwargs[idx]
+
+        return PINN_group(self.name,inputs,self.batch_size,batchable_kwargs=batchable_kwargs,input_vars=self.input_vars,shuffle=self.shuffle,unbatched_kwargs=self.unbatchables)
+
+
 class PINN_dataset(Dataset):
     '''
     Dataset Class for PINN groups. To be used with PINN Dataloader. You can add groups of inputs representing boundary condition, 
@@ -112,7 +123,7 @@ class PINN_dataset(Dataset):
         super().__init__()
         self.groups:PINN_dict[str,PINN_group] = PINN_dict()
         self.input_vars = input_vars
-    def add_group(self,name:str,inputs:Union[torch.Tensor,List,Tuple],targets:Union[torch.Tensor,None] = None,batch_size:int = 1,*,causal:bool = False,shuffle: bool = False,time_col:int = -1):
+    def add_group(self,name:str,inputs:Union[torch.Tensor,List,Tuple],batchable_kwargs:Union[torch.Tensor,None] = None,batch_size:int = 1,*,shuffle: bool = False,unbatched_kwargs = None):
         '''
         Add group to dataset
 
@@ -125,7 +136,7 @@ class PINN_dataset(Dataset):
 
         If multiple inputs are provided then it is assumed that the first dim size is the same across all inputs
         '''
-        self.groups[name] = PINN_group(name,inputs,batch_size,targets,input_vars=self.input_vars,shuffle=shuffle)
+        self.groups[name] = PINN_group(name,inputs,batch_size,batchable_kwargs = batchable_kwargs,input_vars=self.input_vars,shuffle=shuffle,unbatched_kwargs=unbatched_kwargs)
 
     def update_group(self,name,**kwargs):
         '''
@@ -190,7 +201,7 @@ class PINN_dataset(Dataset):
 
 
 class PINN_sampler(Sampler):
-    def __init__(self,groups:PINN_dict):
+    def __init__(self,groups:PINN_dict[str,PINN_group]):
         '''
         Sampler Class for dataloader.
 
@@ -203,7 +214,7 @@ class PINN_sampler(Sampler):
         self.remainder_flag = False
 
     @staticmethod
-    def make_indices(groups) ->Dict[str,torch.Tensor]:
+    def make_indices(groups:PINN_dict[str,PINN_group]) ->Dict[str,torch.Tensor]:
         '''
         Create the indices for each group.
         '''
