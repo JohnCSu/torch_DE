@@ -2,10 +2,11 @@ from torch_DE.equations import get_NavierStokes,get_derivatives
 from torch_DE.geometry.shapes import *
 from torch_DE.continuous.Engines import FD_engine
 from torch_DE.continuous import DE_Getter
-from torch_DE.continuous.Networks import MLP,Wang_Net,Fourier_Net
+from torch_DE.continuous.Networks import Fourier_Net
 from torch.optim.lr_scheduler import StepLR
 from torch_DE.utils import Loss_handler,GradNorm
 from torch_DE.utils.data import PINN_Dataloader,PINN_dataset
+from torch_DE.equations import DE_func
 '''
 The Non Linear Allen Cahn Equation: 
 
@@ -31,29 +32,32 @@ x0 = boundary_points['exterior_edge_0']
 x1 = boundary_points['exterior_edge_2']
 t0= boundary_points['exterior_edge_3']
 
-# Dataset and Loader
-dataset = PINN_dataset()
 
-dataset.add_group('boundary_0',x0,batch_size=100,shuffle = True)
-dataset.add_group('boundary_1',x1,batch_size=100,shuffle = True)
-dataset.add_group('t0',t0,batch_size=100,shuffle = True)
-dataset.add_group('collocation points',sampled_points,batch_size=2000,shuffle=True,causal = do_causal)
+@DE_func
+def u_IC(x,**kwargs):
+    return x**2*torch.cos(torch.pi*x)
 
-# Equations And Losses
-DL = PINN_Dataloader(dataset)
-
-def u_IC(x):
-    return x[:,0]**2*torch.cos(torch.pi*x[:,0])
-
+@DE_func
 def AllenCahn(u_t,u_xx,u,**kwargs):
     return u_t - 0.0001*u_xx + 5*u**3 -5*u
 
 input_vars,output_vars = (['x','t'],['u'])
 derivatives = get_derivatives(input_vars,output_vars,AllenCahn)
 
+# Dataset and Loader
+dataset = PINN_dataset(input_vars)
+
+dataset.add_group('boundary_0',x0,batch_size=100,shuffle = True)
+dataset.add_group('boundary_1',x1,batch_size=100,shuffle = True)
+dataset.add_group('t0',t0,batch_size=100,shuffle = True)
+dataset.add_group('collocation points',sampled_points,batch_size=2000,shuffle=True)
+
+# Equations And Losses
+DL = PINN_Dataloader(dataset)
+
 losses = Loss_handler(dataset)
-losses.add_periodic('boundary_0','boundary_1','u')
-losses.add_periodic('boundary_0','boundary_1','u_x')
+# losses.add_periodic('boundary_0','boundary_1','u')
+# losses.add_periodic('boundary_0','boundary_1','u_x')
 losses.add_initial_condition('t0',{'u':u_IC})
 losses.add_residual('collocation points',{'AllenCahn':AllenCahn})
 
@@ -66,15 +70,20 @@ PINN = DE_Getter(net,input_vars,output_vars,derivatives)
 net = net.cuda()
 
 print(len(DL))
-for epoch in range(0,1001):
+weights = torch.ones(len(losses),dtype = torch.float32,device='cuda')
+for epoch in range(0,301):
+    weight_flag = True
     for x in DL:
         x = x.to('cuda')
         out = PINN(x)
-        loss = losses.calculate(x,out,causal=do_causal,eps = 1)
-        l = loss.individual_loss()
-        ls = [l['initial condition'],l['periodic'],l['residual']]
-        
-        loss_sum = sum(ls)
+        loss = losses.calculate(x,out)
+
+        if epoch > 0 and epoch % 10 == 0 and weight_flag:
+            weights = GradNorm(net,weights,*loss.individual_losses())
+            weight_flag = False
+            print(weights)
+
+        loss_sum = (weights*loss.individual_losses()).sum()
         loss_sum.backward()
         optimizer.step()
         optimizer.zero_grad()

@@ -56,7 +56,7 @@ def set_time(time_type:str,*tensors:torch.Tensor,time_interval:Union[list,tuple]
         return a
 
 
-def add_time(time_type:str,*tensors,time_interval:Union[list,tuple] = None,point:float = None,dim:int = -1):
+def add_time(time_type:str,*tensors,time_interval:Union[list,tuple] = None,point:float = None,dim:int = -1) -> Union[torch.Tensor,list[torch.Tensor]]:
     '''
     Add a time col to a tensor or a list of tensors
 

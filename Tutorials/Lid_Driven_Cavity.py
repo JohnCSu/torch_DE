@@ -5,7 +5,7 @@ from torch.optim.lr_scheduler import StepLR
 from torch_DE.utils.data import PINN_Dataloader,PINN_dataset
 from torch_DE.utils import Loss_handler
 from torch_DE.geometry.shapes import Domain2D,Rectangle
-from torch_DE.equations import get_derivatives
+from torch_DE.equations import get_derivatives,DE_func
 '''
 Lid Driven Cavity Example. This follows from the example given by Nvidia Modulus found here: 
 https://docs.nvidia.com/deeplearning/modulus/modulus-v2209/user_guide/basics/lid_driven_cavity_flow.html
@@ -16,9 +16,9 @@ This Example demonstrates the spatial weighting functionality of torch_DE and th
 xmin,xmax = (-0.1,0.1)
 ymin,ymax = (-0.1,0.1) 
 domain = Domain2D(base = Rectangle(((xmin,ymin),(xmax,ymax) ),'corners'))
-sdf = domain.create_sdf(device = 'cuda')
+sdf =DE_func(domain.create_sdf(device = 'cuda'))
 
-sampled_points = domain.generate_points(400_000)
+sampled_points = domain.generate_points(100_000)
 
 num_points = 10000
 left_wall = domain.generate_points_from_boundary('exterior_edge_0',num_points)
@@ -28,23 +28,17 @@ bot_wall = domain.generate_points_from_boundary('exterior_edge_3',num_points)
 
 no_slip = torch.cat([left_wall,right_wall,bot_wall],dim = 0)
 
-# Dataset and Loader
-dataset = PINN_dataset()
-dataset.add_group('inlet',top_wall,batch_size=1000,shuffle = True)
-dataset.add_group('no slip',no_slip,batch_size=1000,shuffle = True)
-dataset.add_group('collocation points',sampled_points,batch_size=2000,shuffle=True)
-DL = PINN_Dataloader(dataset)
-
-
 #Losses, And Equations
+@DE_func
 def Stokes_Flow_x(u,v,u_x,u_y,u_xx,u_yy,p_x,v_y,v_xx,v_yy,p_y,Re = 100, **kwargs):
     NS_x =u*u_x + v*u_y + p_x - 1/Re*(u_xx + u_yy)
     return NS_x
 
+@DE_func
 def Stokes_Flow_y(u,v,u_x,u_y,u_xx,u_yy,p_x,v_y,v_x,v_xx,v_yy,p_y,Re = 100, **kwargs):
     NS_y =u*v_x + v*v_y + p_y - 1/Re*(v_xx + v_yy)
     return NS_y
-
+@DE_func
 def incomp(u_x,v_y, **kwargs):
     incomp = u_x + v_y
     return incomp
@@ -53,7 +47,14 @@ input_vars = ['x','y']
 output_vars = ['u','v','p']
 derivative_names = get_derivatives(input_vars,output_vars,Stokes_Flow_x,Stokes_Flow_y,incomp,merge = True)
 
-inlet_weight_func = lambda x: 1-10*torch.abs(x[:,0])
+# Dataset and Loader
+dataset = PINN_dataset(input_vars)
+dataset.add_group('inlet',top_wall,batch_size=1000,shuffle = True)
+dataset.add_group('no slip',no_slip,batch_size=1000,shuffle = True)
+dataset.add_group('collocation points',sampled_points,batch_size=2000,shuffle=True)
+DL = PINN_Dataloader(dataset)
+
+inlet_weight_func = DE_func(lambda x,**kwargs: 1-10*torch.abs(x))
 
 losses = Loss_handler(dataset)
 losses.add_boundary('no slip',{'u':0,
@@ -87,8 +88,10 @@ for epoch in range(101):
         #Calculate Derivatives
         out = PINN.calculate(x)
         #Get Losses
-        loss = losses(x,out).individual_loss()
-        loss_sum = loss['residual'] + 100*loss['boundary']
+        loss = losses(x,out)
+        type_losses = loss.grouped_losses('loss_type')
+
+        loss_sum =  type_losses['residual'] + 100*type_losses['boundary']
         loss_sum.backward()
 
         optimizer.step()
@@ -96,9 +99,7 @@ for epoch in range(101):
 
         optimizer.zero_grad()
     # if (epoch % 100) == 0:
-    print(f"Epoch {epoch} Loss {float(loss_sum):.3E} Boundary {float(loss['boundary']):.3E}, Residual {float(loss['residual']):.3E} ")
-
-
+    loss.print_losses(epoch)
 
 
 with torch.no_grad():
@@ -110,9 +111,8 @@ with torch.no_grad():
     u = net(torch.stack([x,y],-1))
 
     plt.title("v for LDC Re=100")
-    plt.tricontourf(x,y,u[:,1],levels =100,cmap = 'jet')
+    plt.tricontourf(x,y,u[:,0],levels =100,cmap = 'jet')
     plt.colorbar()
     plt.xlabel('x')
     plt.ylabel('y')
     plt.show()
-

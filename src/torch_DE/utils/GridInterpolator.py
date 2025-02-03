@@ -41,12 +41,12 @@ class RegularGridInterpolator:
         self.points = [p.to(device = device) for p in self.points]
         self.values = self.values.to(device = device)
         self.device = device
-    def __call__(self, xy:torch.Tensor):
+    def __call__(self,x,y:torch.Tensor,**kwargs):
         '''
         Input
             xy a tensor of size (N,D). It assumes that the first 2 D dimensions represent x and y respectively
         '''
-        return self.interpolate([xy[:,0],xy[:,1]])
+        return self.interpolate([x,y])
     def interpolate(self,points_to_interp):
         with torch.no_grad():
             assert self.points is not None

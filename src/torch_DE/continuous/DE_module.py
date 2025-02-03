@@ -198,30 +198,6 @@ class DE_Getter():
         '''
         return self.calculate(*args,**kwds)
 
-    def test_setup(self,input_tensor = None):
-        #If no input give, assume tensor size of shape (1,len(input_vars))
-        if input_tensor is None:
-            input_tensor = torch.zeros((1,len(self.input_vars)))
-
-
-        #Test 1, check input size is correct and output size is correct
-        try:
-            y = a(x)
-        except RuntimeError as existing_error:
-            error = 'Theres likely a mismatch with the input tensor specified and the shape the network was expecting'
-            error_text = f'{str(existing_error)}\n{error}' 
-            
-            raise RuntimeError(error_text)
-            
-
-        #Check that the output matches 
-        # Ignore Batch size
-        assert y.shape[1:] == len(self.output_vars)
-
-        # Test 2, We can actually extract the derivatives
-
-        
-
 
 if __name__ == '__main__':
     # Collocation Points (From 0 to 2pi)
